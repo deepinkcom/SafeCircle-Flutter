@@ -228,18 +228,15 @@ Future<void> editContact(
     final coords = await _location.getCurrentLocation();
     // Fire-and-forget: the panic alert is sent to the backend in the
     // background while the UI moves straight to the "Emergency Active" screen.
-    await _api.sendPanicAlert(
+    final backendAlertId = await _api.sendPanicAlert(
       latitude: coords.lat,
       longitude: coords.lng,
     );
 
-    final nextId = alertHistory.isEmpty
-        ? 1
-        : alertHistory.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
     alertHistory.insert(
       0,
       AlertEvent(
-        id: nextId,
+        id: backendAlertId,
         kind: AlertKind.emergencySent,
         title: 'Emergency sent',
         timeLabel: 'Just now',

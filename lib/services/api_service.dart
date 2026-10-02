@@ -28,7 +28,7 @@ class ApiService {
 
   final String baseUrl;
 
-  Future<void> sendPanicAlert({
+  Future<int> sendPanicAlert({
   required double latitude,
   required double longitude,
 }) async {
@@ -51,6 +51,9 @@ class ApiService {
       '${response.statusCode} ${response.body}',
     );
   }
+
+  final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['id'] as int;
 }
 
   Future<void> resolveAlert(int alertId) async {
