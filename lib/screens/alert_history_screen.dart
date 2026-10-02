@@ -229,8 +229,8 @@ class _AlertCard extends StatelessWidget {
                 ),
                 if (event.status == AlertStatus.resolved) ...[
                   const SizedBox(height: 4),
-                  Row(
-                    children: const [
+                  const Row(
+                    children: [
                       Icon(Icons.check_circle, color: AppColors.tealPrimary, size: 12),
                       SizedBox(width: 3),
                       Text('Resolved', style: TextStyle(color: AppColors.tealPrimary, fontSize: 11)),

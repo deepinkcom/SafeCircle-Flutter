@@ -46,6 +46,14 @@ enum _AuthScreen { welcome, login, createAccount, loggedIn }
 class _AuthFlowState extends State<_AuthFlow> {
   _AuthScreen _screen = _AuthScreen.welcome;
 
+  Future<void> _loadContacts() async {
+  try {
+    await context.read<AppState>().loadContacts();
+  } catch (error) {
+    debugPrint('Failed to load contacts: $error');
+  }
+}
+
   @override
   Widget build(BuildContext context) {
     switch (_screen) {
@@ -68,8 +76,16 @@ class _AuthFlowState extends State<_AuthFlow> {
           },
           onLogIn: () => setState(() => _screen = _AuthScreen.login),
         );
+
       case _AuthScreen.loggedIn:
-        return _MainShell(onLogOut: () => setState(() => _screen = _AuthScreen.welcome));
+  return FutureBuilder<void>(
+    future: _loadContacts(),
+    builder: (context, snapshot) {
+      return _MainShell(
+        onLogOut: () => setState(() => _screen = _AuthScreen.welcome),
+      );
+    },
+  );
     }
   }
 }

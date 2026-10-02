@@ -46,3 +46,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Visual Studio local files
+.vs/
+
+# Backend environment/secrets
+backend/.env

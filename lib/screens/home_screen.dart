@@ -44,8 +44,8 @@ class HomeScreen extends StatelessWidget {
                   Text('${_greeting()}, $firstName',
                       style: textTheme.headlineMedium?.copyWith(fontSize: 26)),
                   const SizedBox(height: 6),
-                  Row(
-                    children: const [
+                  const Row(
+                    children: [
                       Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 18),
                       SizedBox(width: 6),
                       Text('You are currently safe',
@@ -70,8 +70,8 @@ class HomeScreen extends StatelessWidget {
                               Text('Your current location', style: textTheme.bodyMedium),
                               Text(state.currentLocation, style: textTheme.titleMedium),
                               const SizedBox(height: 4),
-                              Row(
-                                children: const [
+                              const Row(
+                                children: [
                                   Icon(Icons.gps_fixed, color: AppColors.tealPrimary, size: 14),
                                   SizedBox(width: 4),
                                   Text('Accuracy: High',

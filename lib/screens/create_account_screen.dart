@@ -176,8 +176,8 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-              Row(
-                children: const [
+              const Row(
+                children: [
                   Expanded(child: Divider(color: AppColors.divider)),
                   Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),

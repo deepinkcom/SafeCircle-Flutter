@@ -208,9 +208,9 @@ class _ActivatePanicScreenState extends State<ActivatePanicScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Row(
+                    const Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
+                      children: [
                         Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 18),
                         SizedBox(width: 8),
                         Expanded(

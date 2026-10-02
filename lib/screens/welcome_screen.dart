@@ -33,8 +33,8 @@ class WelcomeScreen extends StatelessWidget {
               const SizedBox(height: 28),
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                child: Column(
-                  children: const [
+                child: const Column(
+                  children: [
                     _WelcomeRow(
                       icon: Icons.person_add_alt,
                       title: 'Create an account',
@@ -78,8 +78,8 @@ class WelcomeScreen extends StatelessWidget {
                         style: textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        children: const [
+                      const Row(
+                        children: [
                           Icon(Icons.lock, color: AppColors.tealPrimary, size: 16),
                           SizedBox(width: 6),
                           Text(
@@ -116,8 +116,8 @@ class WelcomeScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('Already have an account? ',
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 14)),
+                  const Text('Already have an account? ',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 14)),
                   GestureDetector(
                     onTap: onLogIn,
                     child: const Text(

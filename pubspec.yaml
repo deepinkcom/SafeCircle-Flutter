@@ -12,6 +12,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   provider: ^6.1.2
   intl: ^0.19.0
+  http: ^1.6.0
 
   # --- Not enabled yet: wire these in once backend/Firebase/Maps are ready ---
   # (kept out of the active dependency list so `flutter pub get` and a first

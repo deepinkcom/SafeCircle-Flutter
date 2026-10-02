@@ -55,39 +55,119 @@ class AppState extends ChangeNotifier {
     ),
   ];
 
-  void toggleContact(int id) {
-    final idx = contacts.indexWhere((c) => c.id == id);
-    if (idx != -1) {
-      contacts[idx] = contacts[idx].copyWith(enabled: !contacts[idx].enabled);
-      notifyListeners();
-    }
-  }
+  Future<void> toggleContact(int id) async {
+  final idx = contacts.indexWhere((c) => c.id == id);
 
-  void addContact(String name, String relationship, String phone) {
-    final nextId = contacts.isEmpty
-        ? 1
-        : contacts.map((c) => c.id).reduce((a, b) => a > b ? a : b) + 1;
-    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
-    var initials = parts.take(2).map((p) => p[0].toUpperCase()).join();
-    if (initials.isEmpty) initials = '?';
-    const palette = [
-      Color(0xFFCDEFE8),
-      Color(0xFFD3E6FB),
-      Color(0xFFE6DEF8),
-      Color(0xFFFBE3D0),
-    ];
-    contacts.add(
-      EmergencyContact(
-        id: nextId,
+  if (idx == -1) return;
+
+  final contact = contacts[idx];
+  final newEnabled = !contact.enabled;
+
+  final data = await _api.updateContact(
+    contactId: id,
+    enabled: newEnabled,
+  );
+
+  contacts[idx] = contact.copyWith(
+    enabled: data['enabled'] as bool? ?? newEnabled,
+  );
+
+  notifyListeners();
+}
+
+Future<void> editContact(
+  int id,
+  String name,
+  String relationship,
+  String phone,
+) async {
+  final idx = contacts.indexWhere((c) => c.id == id);
+
+  if (idx == -1) return;
+
+  final data = await _api.updateContact(
+    contactId: id,
+    name: name,
+    relationship: relationship,
+    phone: phone,
+  );
+
+  final contact = contacts[idx];
+
+  final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+  var initials = parts.take(2).map((p) => p[0].toUpperCase()).join();
+  if (initials.isEmpty) initials = '?';
+
+  contacts[idx] = EmergencyContact(
+    id: data['id'] as int,
+    name: data['name'] as String,
+    relationship: data['relationship'] as String,
+    phone: data['phone'] as String,
+    initials: initials,
+    avatarColor: contact.avatarColor,
+    enabled: data['enabled'] as bool? ?? contact.enabled,
+  );
+
+  notifyListeners();
+}
+
+  Future<void> loadContacts() async {
+  final data = await _api.fetchContacts();
+
+  contacts
+    ..clear()
+    ..addAll(
+      data.map(
+        (contact) => EmergencyContact(
+          id: contact['id'] as int,
+          name: contact['name'] as String,
+          relationship: contact['relationship'] as String,
+          phone: contact['phone'] as String,
+          initials: contact['name']
+              .toString()
+              .trim()
+              .split(RegExp(r'\s+'))
+              .take(2)
+              .map((part) => part[0].toUpperCase())
+              .join(),
+          avatarColor: const Color(0xFFCDEFE8),
+          enabled: contact['enabled'] as bool? ?? true,
+        ),
+      ),
+    );
+
+  notifyListeners();
+}
+
+  Future<void> addContact(
+      String name,
+      String relationship,
+      String phone,
+    ) async {
+      final data = await _api.createContact(
         name: name,
         relationship: relationship,
         phone: phone,
-        initials: initials,
-        avatarColor: palette[contacts.length % palette.length],
-      ),
-    );
-    notifyListeners();
-  }
+      );
+
+      final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+      var initials = parts.take(2).map((p) => p[0].toUpperCase()).join();
+      if (initials.isEmpty) initials = '?';
+
+      contacts.add(
+        EmergencyContact(
+          id: data['id'] as int,
+          name: data['name'] as String,
+          relationship: data['relationship'] as String,
+          phone: data['phone'] as String,
+          initials: initials,
+          avatarColor: const Color(0xFFCDEFE8),
+          enabled: data['enabled'] as bool? ?? true,
+        ),
+      );
+
+      notifyListeners();
+    }
 
   final List<AlertEvent> alertHistory = [
     const AlertEvent(
@@ -148,7 +228,10 @@ class AppState extends ChangeNotifier {
     final coords = await _location.getCurrentLocation();
     // Fire-and-forget: the panic alert is sent to the backend in the
     // background while the UI moves straight to the "Emergency Active" screen.
-    _api.sendPanicAlert(latitude: coords.lat, longitude: coords.lng);
+    await _api.sendPanicAlert(
+      latitude: coords.lat,
+      longitude: coords.lng,
+    );
 
     final nextId = alertHistory.isEmpty
         ? 1
@@ -173,9 +256,18 @@ class AppState extends ChangeNotifier {
     if (idx != -1) {
       final resolvedId = alertHistory[idx].id;
       alertHistory[idx] = alertHistory[idx].copyWith(status: AlertStatus.resolved);
-      _api.resolveAlert(resolvedId);
+      await _api.resolveAlert(resolvedId);
     }
     notifyListeners();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchNearbyAlerts() async {
+    final coords = await _location.getCurrentLocation();
+
+    return _api.fetchNearbyAlerts(
+      latitude: coords.lat,
+      longitude: coords.lng,
+    );
   }
 
   void setName(String name) {

@@ -60,8 +60,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                         const SizedBox(height: 2),
-                        Row(
-                          children: const [
+                        const Row(
+                          children: [
                             Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 14),
                             SizedBox(width: 3),
                             Text('Safety community member',

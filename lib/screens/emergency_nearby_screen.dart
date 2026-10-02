@@ -26,8 +26,8 @@ class EmergencyNearbyScreen extends StatelessWidget {
                 width: double.infinity,
                 color: AppColors.redAlert,
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                child: Row(
-                  children: const [
+                child: const Row(
+                  children: [
                     Icon(Icons.report_problem, color: Colors.white),
                     SizedBox(width: 12),
                     Column(
@@ -185,17 +185,17 @@ class EmergencyNearbyScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20),
                 child: Row(
                   children: [
-                    const Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 18),
-                    const SizedBox(width: 8),
-                    const Expanded(
+                    Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
                       child: Text('Your location is only shared during emergencies.',
                           style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
                     ),
-                    const Text('Learn more',
+                    Text('Learn more',
                         style: TextStyle(
                             color: AppColors.tealPrimary,
                             fontWeight: FontWeight.w600,

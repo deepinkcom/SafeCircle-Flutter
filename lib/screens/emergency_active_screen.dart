@@ -69,8 +69,8 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: const [
+                  const Row(
+                    children: [
                       Icon(Icons.report_problem, color: AppColors.redAlert),
                       SizedBox(width: 8),
                       Text('Emergency Active',
@@ -89,9 +89,9 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                       color: AppColors.tealBg,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Row(
+                    child: const Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
+                      children: [
                         _Dot(),
                         SizedBox(width: 6),
                         Text('Live location sharing on',
@@ -110,16 +110,16 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     color: const Color(0xFFE7EEF1),
-                    child: Stack(
+                    child: const Stack(
                       children: [
-                        const Positioned.fill(child: MockRouteMap()),
+                        Positioned.fill(child: MockRouteMap()),
                         Positioned(
                           top: 14,
                           right: 14,
                           child: Column(
                             children: [
                               _MapFab(icon: Icons.gps_fixed),
-                              const SizedBox(height: 10),
+                              SizedBox(height: 10),
                               _MapFab(icon: Icons.layers),
                             ],
                           ),
