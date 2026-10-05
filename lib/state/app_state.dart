@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/location_service.dart';
+import 'package:intl/intl.dart';
 
 /// Central, observable app state. Screens read from this via
 /// `context.watch<AppState>()` / `context.read<AppState>()`.
@@ -139,6 +140,33 @@ Future<void> editContact(
   notifyListeners();
 }
 
+Future<void> loadAlertHistory() async {
+  final data = await _api.fetchAlertHistory();
+
+  alertHistory
+    ..clear()
+    ..addAll(
+      data.map(
+        (alert) => AlertEvent(
+          id: alert['id'] as int,
+          kind: AlertKind.emergencySent,
+          title: 'Emergency sent',
+          timeLabel: DateFormat('d MMM yyyy, HH:mm').format(
+              DateTime.parse(alert['created_at'].toString()).toLocal(),
+            ),
+          locationLabel: alert['location_label']?.toString() ?? '',
+          status: switch (alert['status']?.toString()) {
+            'resolved' => AlertStatus.resolved,
+            'cancelled' => AlertStatus.cancelled,
+            _ => AlertStatus.active,
+          },
+        ),
+      ),
+    );
+
+  notifyListeners();
+}
+
   Future<void> addContact(
       String name,
       String relationship,
@@ -221,7 +249,14 @@ Future<void> editContact(
   ];
 
   bool isEmergencyActive = false;
-  final nearbyPerson = const NearbyPerson(name: 'Ayanda', distanceLabel: '420 m away');
+  NearbyPerson nearbyPerson = NearbyPerson(
+  id: 0,
+  name: 'Ayanda',
+  distanceLabel: '420 m away',
+  locationLabel: '',
+  status: 'active',
+  createdAt: DateTime.now(),
+);
 
   Future<void> startEmergency() async {
     isEmergencyActive = true;
@@ -259,17 +294,38 @@ Future<void> editContact(
   }
 
   Future<List<Map<String, dynamic>>> fetchNearbyAlerts() async {
-    final coords = await _location.getCurrentLocation();
+  final coords = await _location.getCurrentLocation();
 
-    return _api.fetchNearbyAlerts(
-      latitude: coords.lat,
-      longitude: coords.lng,
-    );
+  return _api.fetchNearbyAlerts(
+    latitude: coords.lat,
+    longitude: coords.lng,
+  );
+}
+
+  Future<void> loadNearbyAlert() async {
+  final alerts = await fetchNearbyAlerts();
+
+  if (alerts.isEmpty) {
+    return;
   }
 
-  void setName(String name) {
-    if (name.trim().isEmpty) return;
-    userProfile = userProfile.copyWith(name: name);
-    notifyListeners();
-  }
+  final alert = alerts.first;
+
+  nearbyPerson = NearbyPerson(
+    id: alert['id'] as int,
+    name: 'Emergency nearby',
+    distanceLabel: '${alert['distance_km']} km away',
+    locationLabel: alert['location_label']?.toString() ?? '',
+    status: alert['status']?.toString() ?? 'active',
+    createdAt: DateTime.parse(alert['created_at'].toString()),
+  );
+
+  notifyListeners();
+}
+
+void setName(String name) {
+  if (name.trim().isEmpty) return;
+  userProfile = userProfile.copyWith(name: name);
+  notifyListeners();
+}
 }

@@ -48,9 +48,11 @@ class _AuthFlowState extends State<_AuthFlow> {
 
   Future<void> _loadContacts() async {
   try {
-    await context.read<AppState>().loadContacts();
+    final appState = context.read<AppState>();
+    await appState.loadContacts();
+    await appState.loadAlertHistory();
   } catch (error) {
-    debugPrint('Failed to load contacts: $error');
+    debugPrint('Failed to load app data: $error');
   }
 }
 

@@ -83,8 +83,19 @@ class UserProfile {
 }
 
 class NearbyPerson {
+  final int id;
   final String name;
   final String distanceLabel;
+  final String locationLabel;
+  final String status;
+  final DateTime createdAt;
 
-  const NearbyPerson({required this.name, required this.distanceLabel});
+  const NearbyPerson({
+    required this.id,
+    required this.name,
+    required this.distanceLabel,
+    required this.locationLabel,
+    required this.status,
+    required this.createdAt,
+  });
 }

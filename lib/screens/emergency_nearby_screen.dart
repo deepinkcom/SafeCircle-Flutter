@@ -5,11 +5,22 @@ import '../theme/app_colors.dart';
 import '../widgets/mock_map.dart';
 import '../widgets/safe_circle_mark.dart';
 
-class EmergencyNearbyScreen extends StatelessWidget {
+class EmergencyNearbyScreen extends StatefulWidget {
   const EmergencyNearbyScreen({super.key, required this.onBack, required this.onImOnMyWay});
 
   final VoidCallback onBack;
   final VoidCallback onImOnMyWay;
+
+    @override
+  State<EmergencyNearbyScreen> createState() => _EmergencyNearbyScreenState();
+  }
+
+class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
+  @override
+  void initState() {
+    super.initState();
+    context.read<AppState>().loadNearbyAlert();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +33,14 @@ class EmergencyNearbyScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+            Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: IconButton(
+                    onPressed: widget.onBack,
+                    icon: const Icon(Icons.arrow_back),
+                    color: AppColors.navyDark,
+                  ),
+                ),
               Container(
                 width: double.infinity,
                 color: AppColors.redAlert,
@@ -168,7 +187,7 @@ class EmergencyNearbyScreen extends StatelessWidget {
                       width: double.infinity,
                       height: 54,
                       child: OutlinedButton.icon(
-                        onPressed: onImOnMyWay,
+                        onPressed: widget.onImOnMyWay,
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: AppColors.tealPrimary),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),

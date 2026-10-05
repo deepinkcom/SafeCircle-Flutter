@@ -69,6 +69,27 @@ class ApiService {
   }
 }
 
+Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
+  final response = await http.get(
+    Uri.parse('$baseUrl/alerts/history'),
+  );
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(
+      'Failed to fetch alert history: '
+      '${response.statusCode} ${response.body}',
+    );
+  }
+
+  final data = jsonDecode(response.body);
+
+  if (data is! List) {
+    throw Exception('Unexpected alert history response.');
+  }
+
+  return List<Map<String, dynamic>>.from(data);
+}
+
   Future<List<Map<String, dynamic>>> fetchNearbyAlerts({
   required double latitude,
   required double longitude,
