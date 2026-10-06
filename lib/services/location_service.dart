@@ -1,16 +1,43 @@
-/// Wraps device GPS (see stack: "Maps and geolocation - Google Maps Flutter
-/// package and device location services").
-///
-/// To activate: uncomment `geolocator` in pubspec.yaml, add the location
-/// permission strings to Info.plist / AndroidManifest.xml, and replace
-/// [getCurrentLocation] with a real `Geolocator.getCurrentPosition()` call
-/// (after requesting permission via `Geolocator.requestPermission()`).
+import 'package:geolocator/geolocator.dart';
+
+/// Handles access to the device's GPS location.
 class LocationService {
-  /// Returns (latitude, longitude). Currently returns a fixed mock
-  /// coordinate (Sandton, Johannesburg) matching the design mockups.
+  /// Returns the device's current latitude and longitude.
   Future<({double lat, double lng})> getCurrentLocation() async {
-    // TODO: replace with Geolocator.getCurrentPosition()
-    await Future<void>.delayed(const Duration(milliseconds: 150));
-    return (lat: -26.1076, lng: 28.0567);
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      throw Exception(
+        'Location services are disabled. Please enable Location on your device.',
+      );
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+
+      if (permission == LocationPermission.denied) {
+        throw Exception(
+          'Location permission was denied.',
+        );
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception(
+        'Location permission is permanently denied. '
+        'Please enable it in the device settings.',
+      );
+    }
+
+    final Position position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+
+    return (
+      lat: position.latitude,
+      lng: position.longitude,
+    );
   }
 }

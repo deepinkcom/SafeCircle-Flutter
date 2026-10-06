@@ -24,7 +24,7 @@ import 'package:http/http.dart' as http;
 //                                   backed by PostGIS ST_DWithin
 
 class ApiService {
-  ApiService({this.baseUrl = 'http://192.168.0.28:8000'});
+  ApiService({this.baseUrl = 'http://192.168.0.24:8000'});
 
   final String baseUrl;
 

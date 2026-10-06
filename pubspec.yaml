@@ -19,7 +19,7 @@ dependencies:
   # run work with zero external setup - see README.md "Next steps")
   #
   # google_maps_flutter: ^2.6.0   # real map tiles (needs a Google Maps API key)
-  # geolocator: ^12.0.0           # device GPS location
+  geolocator: ^12.0.0           # device GPS location
   # firebase_core: ^2.27.0        # required by firebase_auth / messaging
   # firebase_auth: ^4.17.0        # matches "Firebase Authentication" in the stack
   # firebase_messaging: ^14.7.20  # matches "Firebase Cloud Messaging" in the stack
