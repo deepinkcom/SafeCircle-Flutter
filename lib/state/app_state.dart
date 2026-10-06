@@ -261,8 +261,10 @@ Future<void> loadAlertHistory() async {
   Future<void> startEmergency() async {
     isEmergencyActive = true;
     final coords = await _location.getCurrentLocation();
-        currentLocation =
-        '${coords.lat.toStringAsFixed(6)}, ${coords.lng.toStringAsFixed(6)}';
+    currentLocation = await _location.getReadableLocation(
+      lat: coords.lat,
+      lng: coords.lng,
+    );
     // Fire-and-forget: the panic alert is sent to the backend in the
     // background while the UI moves straight to the "Emergency Active" screen.
     final backendAlertId = await _api.sendPanicAlert(
