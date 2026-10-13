@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal
-from .models import Alert
+from .models import Alert, AlertAcknowledgement
 
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -96,21 +96,71 @@ def resolve_alert(
         "resolved_at": alert.resolved_at.isoformat(),
     }
 
+@router.post("/{alert_id}/acknowledge")
+def acknowledge_alert(
+    alert_id: int,
+    user_id: int = 1,
+    db: Session = Depends(get_db),
+):
+    alert = db.scalar(
+        select(Alert).where(
+            Alert.id == alert_id,
+            Alert.status == "active",
+        )
+    )
+
+    if alert is None:
+        return {"error": "Active alert not found"}
+
+    acknowledgement = db.scalar(
+        select(AlertAcknowledgement).where(
+            AlertAcknowledgement.alert_id == alert_id,
+            AlertAcknowledgement.responder_user_id == user_id,
+        )
+    )
+
+    if acknowledgement is None:
+        acknowledgement = AlertAcknowledgement(
+            alert_id=alert_id,
+            responder_user_id=user_id,
+            status="on_my_way",
+            created_at=datetime.utcnow(),
+        )
+        db.add(acknowledgement)
+        db.commit()
+        db.refresh(acknowledgement)
+
+    return {
+        "id": acknowledgement.id,
+        "alert_id": acknowledgement.alert_id,
+        "responder_user_id": acknowledgement.responder_user_id,
+        "status": acknowledgement.status,
+        "created_at": acknowledgement.created_at.isoformat(),
+    }
 
 @router.get("/history")
 def get_alert_history(
     user_id: int = 1,
     db: Session = Depends(get_db),
 ):
-    statement = (
+    alert_statement = (
         select(Alert)
         .where(Alert.user_id == user_id)
         .order_by(Alert.created_at.desc())
     )
 
-    alerts = db.scalars(statement).all()
+    alerts = db.scalars(alert_statement).all()
 
-    return [
+    acknowledgement_statement = (
+        select(AlertAcknowledgement, Alert)
+        .join(Alert, Alert.id == AlertAcknowledgement.alert_id)
+        .where(AlertAcknowledgement.responder_user_id == user_id)
+        .order_by(AlertAcknowledgement.created_at.desc())
+    )
+
+    acknowledgements = db.execute(acknowledgement_statement).all()
+
+    history = [
         {
             "id": alert.id,
             "kind": alert.kind,
@@ -126,6 +176,24 @@ def get_alert_history(
         for alert in alerts
     ]
 
+    history.extend(
+        {
+            "id": acknowledgement.id,
+            "alert_id": alert.id,
+            "kind": "nearby_received",
+            "status": acknowledgement.status,
+            "location_label": alert.location_label,
+            "created_at": acknowledgement.created_at.isoformat(),
+            "resolved_at": None,
+        }
+        for acknowledgement, alert in acknowledgements
+    )
+
+    return sorted(
+        history,
+        key=lambda item: item["created_at"],
+        reverse=True,
+    )
 
 @router.get("/nearby")
 def get_nearby_alerts(
@@ -150,6 +218,7 @@ def get_nearby_alerts(
         select(Alert, distance.label("distance_meters"))
         .where(
             Alert.location.is_not(None),
+            Alert.status == "active",
             ST_DWithin(
                 Alert.location,
                 search_point,

@@ -24,7 +24,7 @@ import 'package:http/http.dart' as http;
 //                                   backed by PostGIS ST_DWithin
 
 class ApiService {
-  ApiService({this.baseUrl = 'http://192.168.0.24:8000'});
+  ApiService({this.baseUrl = 'http://10.234.234.6:8000'});
 
   final String baseUrl;
 
@@ -67,6 +67,27 @@ class ApiService {
       '${response.statusCode} ${response.body}',
     );
   }
+}
+
+Future<Map<String, dynamic>> acknowledgeAlert(int alertId) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/alerts/$alertId/acknowledge'),
+  );
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(
+      'Failed to acknowledge alert: '
+      '${response.statusCode} ${response.body}',
+    );
+  }
+
+  final data = jsonDecode(response.body);
+
+  if (data is! Map<String, dynamic>) {
+    throw Exception('Unexpected acknowledge alert response.');
+  }
+
+  return data;
 }
 
 Future<List<Map<String, dynamic>>> fetchAlertHistory() async {

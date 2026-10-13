@@ -51,8 +51,10 @@ class _AuthFlowState extends State<_AuthFlow> {
     final appState = context.read<AppState>();
     await appState.loadContacts();
     await appState.loadAlertHistory();
-  } catch (error) {
+    await appState.loadCurrentLocation();
+  } catch (error, stackTrace) {
     debugPrint('Failed to load app data: $error');
+    debugPrint('$stackTrace');
   }
 }
 
@@ -80,14 +82,16 @@ class _AuthFlowState extends State<_AuthFlow> {
         );
 
       case _AuthScreen.loggedIn:
-  return FutureBuilder<void>(
-    future: _loadContacts(),
-    builder: (context, snapshot) {
-      return _MainShell(
-        onLogOut: () => setState(() => _screen = _AuthScreen.welcome),
-      );
-    },
-  );
+          debugPrint('AUTH: loggedIn screen reached');
+
+          return FutureBuilder<void>(
+            future: _loadContacts(),
+            builder: (context, snapshot) {
+              return _MainShell(
+                onLogOut: () => setState(() => _screen = _AuthScreen.welcome),
+              );
+            },
+          );
     }
   }
 }
@@ -204,7 +208,11 @@ class _MainShellState extends State<_MainShell> {
       MaterialPageRoute(
         builder: (_) => EmergencyNearbyScreen(
           onBack: () => Navigator.of(context).pop(),
-          onImOnMyWay: () => Navigator.of(context).pop(),
+          onImOnMyWay: () async {
+            await context.read<AppState>().acknowledgeNearbyAlert();
+            if (!mounted) return;
+            Navigator.of(context).pop();
+          },
         ),
       ),
     );
@@ -226,10 +234,14 @@ class _MainShellState extends State<_MainShell> {
         onOpenContacts: _openContacts,
         onOpenAlerts: _openEmergencyNearby,
       ),
-      EmergencyNearbyScreen(
-        onBack: () => setState(() => _tabIndex = 0),
-        onImOnMyWay: () => setState(() => _tabIndex = 0),
-      ),
+    EmergencyNearbyScreen(
+      onBack: () => setState(() => _tabIndex = 0),
+      onImOnMyWay: () async {
+        await context.read<AppState>().acknowledgeNearbyAlert();
+        if (!mounted) return;
+        setState(() => _tabIndex = 0);
+      },
+    ),
       _MapTab(onActivatePanic: _openActivatePanic),
       const AlertHistoryScreen(),
       ProfileScreen(onOpenContacts: _openContacts, onLogOut: widget.onLogOut),

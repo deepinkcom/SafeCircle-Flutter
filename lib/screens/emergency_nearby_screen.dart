@@ -9,7 +9,7 @@ class EmergencyNearbyScreen extends StatefulWidget {
   const EmergencyNearbyScreen({super.key, required this.onBack, required this.onImOnMyWay});
 
   final VoidCallback onBack;
-  final VoidCallback onImOnMyWay;
+  final Future<void> Function() onImOnMyWay;
 
     @override
   State<EmergencyNearbyScreen> createState() => _EmergencyNearbyScreenState();
@@ -27,9 +27,48 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
     final person = context.watch<AppState>().nearbyPerson;
     final textTheme = Theme.of(context).textTheme;
 
-    return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
+    if (person == null) {
+  return Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.check_circle_outline,
+                color: AppColors.tealPrimary,
+                size: 72,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'No nearby emergencies detected',
+                textAlign: TextAlign.center,
+                style: textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'There are no active emergency alerts near your current location.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: widget.onBack,
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Back to Home'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+return Scaffold(
+  body: SafeArea(
+    child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -187,8 +226,10 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                       width: double.infinity,
                       height: 54,
                       child: OutlinedButton.icon(
-                        onPressed: widget.onImOnMyWay,
-                        style: OutlinedButton.styleFrom(
+                          onPressed: () async {
+                            await widget.onImOnMyWay();
+                          },
+                          style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: AppColors.tealPrimary),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                         ),

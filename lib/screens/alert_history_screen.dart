@@ -82,7 +82,10 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 itemCount: filtered.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => _AlertCard(event: filtered[index]),
+                itemBuilder: (context, index) => _AlertCard(
+                  event: filtered[index],
+                  onResolve: () => context.read<AppState>().resolveAlertById(filtered[index].id),
+                ),
               ),
             ),
           ],
@@ -138,9 +141,10 @@ class _FilterPill extends StatelessWidget {
 }
 
 class _AlertCard extends StatelessWidget {
-  const _AlertCard({required this.event});
+    const _AlertCard({required this.event, required this.onResolve});
 
-  final AlertEvent event;
+    final AlertEvent event;
+    final Future<void> Function() onResolve;
 
   @override
   Widget build(BuildContext context) {
@@ -168,7 +172,7 @@ class _AlertCard extends StatelessWidget {
     late String statusLabel;
     late Color statusColor;
     late Color statusBg;
-    switch (event.status) {
+   switch (event.status) {
       case AlertStatus.active:
         statusLabel = 'Active';
         statusColor = AppColors.redAlert;
@@ -184,7 +188,15 @@ class _AlertCard extends StatelessWidget {
         statusColor = AppColors.textMuted;
         statusBg = const Color(0xFFEDEFF2);
         break;
+      case AlertStatus.acknowledged:
+        statusLabel = 'On my way';
+        statusColor = AppColors.tealPrimary;
+        statusBg = AppColors.tealBg;
+        break;
     }
+
+    final canResolve = event.kind == AlertKind.emergencySent &&
+        event.status == AlertStatus.active;
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -227,19 +239,29 @@ class _AlertCard extends StatelessWidget {
                       style: TextStyle(
                           color: statusColor, fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
-                if (event.status == AlertStatus.resolved) ...[
+                if (event.status == AlertStatus.resolved ||
+                    event.status == AlertStatus.acknowledged) ...[
                   const SizedBox(height: 4),
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.check_circle, color: AppColors.tealPrimary, size: 12),
-                      SizedBox(width: 3),
-                      Text('Resolved', style: TextStyle(color: AppColors.tealPrimary, fontSize: 11)),
+                      const Icon(Icons.check_circle, color: AppColors.tealPrimary, size: 12),
+                      const SizedBox(width: 3),
+                      Text(
+                        event.status == AlertStatus.resolved ? 'Resolved' : 'Acknowledged',
+                        style: const TextStyle(color: AppColors.tealPrimary, fontSize: 11),
+                      ),
                     ],
                   ),
                 ],
               ],
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textMuted),
+            if (canResolve)
+              TextButton(
+                onPressed: onResolve,
+                child: const Text('Resolve'),
+              )
+            else
+              const Icon(Icons.chevron_right, color: AppColors.textMuted),
           ],
         ),
       ),

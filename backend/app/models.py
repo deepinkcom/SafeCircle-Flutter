@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from geoalchemy2 import Geography
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -67,7 +67,33 @@ class Alert(Base):
         nullable=True,
     )
 
+class AlertAcknowledgement(Base):
+    __tablename__ = "alert_acknowledgements"
+    __table_args__ = (
+        UniqueConstraint(
+            "alert_id",
+            "responder_user_id",
+            name="uq_alert_acknowledgements_alert_responder",
+        ),
+    )
 
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alert_id: Mapped[int] = mapped_column(
+        ForeignKey("alerts.id"),
+        nullable=False,
+    )
+    responder_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+ 
 class Device(Base):
     __tablename__ = "devices"
 

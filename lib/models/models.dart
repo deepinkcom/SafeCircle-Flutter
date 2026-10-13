@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 enum AlertKind { emergencySent, nearbyReceived, testSent }
 
-enum AlertStatus { active, resolved, cancelled }
+enum AlertStatus { active, resolved, cancelled, acknowledged }
 
 class EmergencyContact {
   final int id;
