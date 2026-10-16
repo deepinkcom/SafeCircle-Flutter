@@ -1,24 +1,27 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import 'package:intl/intl.dart';
 
 /// Central, observable app state. Screens read from this via
 /// `context.watch<AppState>()` / `context.read<AppState>()`.
 ///
-/// This currently holds everything in memory so the app is fully usable
-/// with zero backend setup. Each mutating method already calls through the
-/// relevant service stub (see lib/services/) so wiring up the real FastAPI
-/// backend / PostGIS-backed queries later is a matter of filling in those
-/// stubs - this class's public API shouldn't need to change.
+/// User profiles are stored in Cloud Firestore (`users/{uid}`). Contacts,
+/// alerts, and location still go through the API and location services.
 class AppState extends ChangeNotifier {
-  AppState({ApiService? apiService, LocationService? locationService})
-      : _api = apiService ?? ApiService(),
-        _location = locationService ?? LocationService();
+  AppState({
+    ApiService? apiService,
+    LocationService? locationService,
+    AuthService? authService,
+  })  : _api = apiService ?? ApiService(),
+        _location = locationService ?? LocationService(),
+        _auth = authService ?? AuthService();
 
   final ApiService _api;
   final LocationService _location;
+  final AuthService _auth;
 
   UserProfile userProfile = const UserProfile(
       name: '',
@@ -32,6 +35,90 @@ class AppState extends ChangeNotifier {
   void setName(String name) {
   userProfile = userProfile.copyWith(name: name);
   notifyListeners();
+  }
+
+  /// Restores the signed-in profile from Firebase Auth + Firestore.
+  /// Returns true when a session was found.
+  Future<bool> restoreSession() async {
+    try {
+      final profile = await _auth.restoreProfile();
+      if (profile == null) return false;
+      userProfile = profile;
+      notifyListeners();
+      return true;
+    } on AuthFailure catch (error) {
+      debugPrint('AUTH: restore failed: $error');
+      return false;
+    } catch (error) {
+      debugPrint('AUTH: restore failed: $error');
+      return false;
+    }
+  }
+
+  Future<String?> signUp({
+    required String fullName,
+    required String email,
+    required String phone,
+    required String password,
+  }) async {
+    try {
+      userProfile = await _auth.signUp(
+        fullName: fullName,
+        email: email,
+        phone: phone,
+        password: password,
+      );
+      notifyListeners();
+      return null;
+    } on AuthFailure catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'Something went wrong. Please try again.';
+    }
+  }
+
+  Future<String?> logIn({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      userProfile = await _auth.logIn(email: email, password: password);
+      notifyListeners();
+      return null;
+    } on AuthFailure catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'Something went wrong. Please try again.';
+    }
+  }
+
+  Future<String?> updateProfile({
+    required String name,
+    required String phone,
+    required String city,
+  }) async {
+    try {
+      userProfile = await _auth.updateProfile(
+        userProfile.copyWith(name: name.trim(), phone: phone.trim(), city: city.trim()),
+      );
+      notifyListeners();
+      return null;
+    } on AuthFailure catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'Something went wrong. Please try again.';
+    }
+  }
+
+  Future<void> logOut() async {
+    await _auth.logOut();
+    userProfile = const UserProfile(name: '', city: '', email: '', phone: '');
+    contacts.clear();
+    alertHistory.clear();
+    isEmergencyActive = false;
+    nearbyPerson = null;
+    currentLocation = '';
+    notifyListeners();
   }
 
   final List<EmergencyContact> contacts = [];

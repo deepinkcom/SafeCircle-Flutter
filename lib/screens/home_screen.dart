@@ -27,7 +27,8 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final firstName = state.userProfile.name.split(' ').first;
+    final rawName = state.userProfile.name.trim();
+    final firstName = rawName.isEmpty ? 'there' : rawName.split(RegExp(r'\s+')).first;
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(

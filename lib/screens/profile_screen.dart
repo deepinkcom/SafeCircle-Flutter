@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/models.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../widgets/top_brand_bar.dart';
@@ -16,6 +17,18 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _notificationsEnabled = true;
+
+  Future<void> _editPersonalDetails() async {
+    final profile = context.read<AppState>().userProfile;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => _PersonalDetailsDialog(profile: profile),
+    );
+    if (!mounted || saved != true) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Your details were saved.')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,31 +60,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       child: const Icon(Icons.person, color: AppColors.tealPrimary, size: 32),
                     ),
                     const SizedBox(width: 14),
-                    Column(
+                    Expanded(
+                      child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(profile.name, style: textTheme.titleLarge),
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on, color: AppColors.textMuted, size: 14),
-                            const SizedBox(width: 3),
-                            Text(profile.city,
-                                style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
-                          ],
-                        ),
+                        Text(profile.name.isEmpty ? 'SafeCircle member' : profile.name,
+                            style: textTheme.titleLarge),
+                        if (profile.email.isNotEmpty)
+                          Text(profile.email,
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                        if (profile.phone.isNotEmpty)
+                          Text(profile.phone,
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                        if (profile.city.isNotEmpty)
+                          Row(
+                            children: [
+                              const Icon(Icons.location_on, color: AppColors.textMuted, size: 14),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(profile.city,
+                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                              ),
+                            ],
+                          ),
                         const SizedBox(height: 2),
                         const Row(
                           children: [
                             Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 14),
                             SizedBox(width: 3),
-                            Text('Safety community member',
-                                style: TextStyle(
-                                    color: AppColors.tealPrimary,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600)),
+                            Flexible(
+                              child: Text('Safety community member',
+                                  style: TextStyle(
+                                      color: AppColors.tealPrimary,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600)),
+                            ),
                           ],
                         ),
                       ],
+                    ),
                     ),
                   ],
                 ),
@@ -81,8 +108,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _SettingsRow(
               icon: Icons.person,
               title: 'Personal Details',
-              subtitle: 'Update your name, email and phone',
-              onTap: () {},
+              subtitle: 'Update your name, phone and city',
+              onTap: _editPersonalDetails,
             ),
             _SettingsRow(
               icon: Icons.shield,
@@ -252,6 +279,125 @@ class _SettingsToggleRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PersonalDetailsDialog extends StatefulWidget {
+  const _PersonalDetailsDialog({required this.profile});
+
+  final UserProfile profile;
+
+  @override
+  State<_PersonalDetailsDialog> createState() => _PersonalDetailsDialogState();
+}
+
+class _PersonalDetailsDialogState extends State<_PersonalDetailsDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _phone;
+  late final TextEditingController _city;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.profile.name);
+    _phone = TextEditingController(text: widget.profile.phone);
+    _city = TextEditingController(text: widget.profile.city);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _phone.dispose();
+    _city.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_name.text.trim().isEmpty) {
+      setState(() => _error = 'Enter your name.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final error = await context.read<AppState>().updateProfile(
+          name: _name.text,
+          phone: _phone.text,
+          city: _city.text,
+        );
+    if (!mounted) return;
+    if (error != null) {
+      setState(() {
+        _busy = false;
+        _error = error;
+      });
+      return;
+    }
+    Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Personal Details'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _name,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Full name'),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                widget.profile.email.isEmpty
+                    ? 'Email is your sign-in address'
+                    : widget.profile.email,
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _phone,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(labelText: 'Phone'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _city,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'City'),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: AppColors.redAlert, fontSize: 13)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: _busy ? null : _save,
+          child: _busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
+        ),
+      ],
     );
   }
 }

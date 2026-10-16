@@ -62,24 +62,53 @@ class AlertEvent {
 }
 
 class UserProfile {
+  final String uid;
   final String name;
   final String city;
   final String email;
   final String phone;
 
   const UserProfile({
+    this.uid = '',
     required this.name,
     required this.city,
     this.email = '',
     this.phone = '',
   });
 
-  UserProfile copyWith({String? name}) => UserProfile(
+  bool get isSignedIn => uid.isNotEmpty;
+
+  UserProfile copyWith({
+    String? uid,
+    String? name,
+    String? city,
+    String? email,
+    String? phone,
+  }) =>
+      UserProfile(
+        uid: uid ?? this.uid,
         name: name ?? this.name,
-        city: city,
-        email: email,
-        phone: phone,
+        city: city ?? this.city,
+        email: email ?? this.email,
+        phone: phone ?? this.phone,
       );
+
+  factory UserProfile.fromMap(String uid, Map<String, dynamic> data) {
+    return UserProfile(
+      uid: uid,
+      name: data['name']?.toString() ?? '',
+      city: data['city']?.toString() ?? '',
+      email: data['email']?.toString() ?? '',
+      phone: data['phone']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'name': name,
+        'city': city,
+        'email': email,
+        'phone': phone,
+      };
 }
 
 class NearbyPerson {

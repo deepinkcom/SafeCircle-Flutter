@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "926463275124",
+    "project_id": "deepinkapp-124a6",
+    "storage_bucket": "deepinkapp-124a6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:926463275124:android:7a136ae86b9bc21dd2a121",
+        "android_client_info": {
+          "package_name": "Safe.Circle1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCnU4dCFjfppak14EqTnbaeW_qqmz-UISQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:926463275124:android:c6240bc0a09c786dd2a121",
+        "android_client_info": {
+          "package_name": "com.example.safecircle"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCnU4dCFjfppak14EqTnbaeW_qqmz-UISQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -11,7 +11,12 @@ class CreateAccountScreen extends StatefulWidget {
   });
 
   final VoidCallback onBack;
-  final ValueChanged<String> onCreateAccount;
+  final Future<String?> Function({
+    required String fullName,
+    required String email,
+    required String phone,
+    required String password,
+  }) onCreateAccount;
   final VoidCallback onLogIn;
 
   @override
@@ -27,6 +32,50 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
   bool _agreed = false;
   bool _showPw = false;
   bool _showConfirmPw = false;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    final fullName = _fullName.text.trim();
+    final email = _email.text.trim();
+    final phone = _phone.text.trim();
+    final password = _password.text;
+    final confirmPassword = _confirmPassword.text;
+
+    String? error;
+    if (fullName.isEmpty) {
+      error = 'Enter your full name.';
+    } else if (!email.contains('@') || !email.contains('.')) {
+      error = 'Enter a valid email address.';
+    } else if (phone.isEmpty) {
+      error = 'Enter your mobile number.';
+    } else if (password.length < 6) {
+      error = 'Password must be at least 6 characters.';
+    } else if (password != confirmPassword) {
+      error = 'Passwords do not match.';
+    }
+
+    if (error != null) {
+      setState(() => _error = error);
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final result = await widget.onCreateAccount(
+      fullName: fullName,
+      email: email,
+      phone: phone,
+      password: password,
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = result;
+    });
+  }
 
   @override
   void dispose() {
@@ -155,22 +204,32 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                   ],
                 ),
               ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _error!,
+                  style: const TextStyle(color: AppColors.redAlert, fontSize: 13),
+                ),
+              ],
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton.icon(
-                  onPressed: _agreed
-                      ? () => widget.onCreateAccount(
-                          _fullName.text.trim().isEmpty ? 'New Member' : _fullName.text.trim())
-                      : null,
+                  onPressed: _agreed && !_busy ? _submit : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.navyDark,
                     disabledBackgroundColor: AppColors.navyDark.withValues(alpha: 0.4),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                   ),
-                  icon: const Icon(Icons.person_add_alt, size: 18),
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.person_add_alt, size: 18),
                   label: const Text('Create Account',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                 ),

@@ -5,7 +5,7 @@ import '../widgets/safe_circle_mark.dart';
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.onLogIn, required this.onCreateAccount});
 
-  final VoidCallback onLogIn;
+  final Future<String?> Function(String email, String password) onLogIn;
   final VoidCallback onCreateAccount;
 
   @override
@@ -16,6 +16,27 @@ class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _showPassword = false;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    final email = _email.text.trim();
+    final password = _password.text;
+    if (email.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Enter your email and password.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final error = await widget.onLogIn(email, password);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = error;
+    });
+  }
 
   @override
   void dispose() {
@@ -76,18 +97,32 @@ class _LoginScreenState extends State<LoginScreen> {
                           fontWeight: FontWeight.w600)),
                 ],
               ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: const TextStyle(color: AppColors.redAlert, fontSize: 13),
+                ),
+              ],
               const SizedBox(height: 18),
               SizedBox(
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton.icon(
-                  onPressed: widget.onLogIn,
+                  onPressed: _busy ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.navyDark,
+                    disabledBackgroundColor: AppColors.navyDark.withValues(alpha: 0.4),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                   ),
-                  icon: const Icon(Icons.lock, size: 18),
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.lock, size: 18),
                   label: const Text('Log In',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                 ),

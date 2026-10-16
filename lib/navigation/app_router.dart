@@ -46,6 +46,18 @@ enum _AuthScreen { welcome, login, createAccount, loggedIn }
 class _AuthFlowState extends State<_AuthFlow> {
   _AuthScreen _screen = _AuthScreen.welcome;
 
+  @override
+  void initState() {
+    super.initState();
+    _restoreSession();
+  }
+
+  Future<void> _restoreSession() async {
+    final restored = await context.read<AppState>().restoreSession();
+    if (!mounted || !restored) return;
+    setState(() => _screen = _AuthScreen.loggedIn);
+  }
+
   Future<void> _loadContacts() async {
   try {
     final appState = context.read<AppState>();
@@ -68,15 +80,35 @@ class _AuthFlowState extends State<_AuthFlow> {
         );
       case _AuthScreen.login:
         return LoginScreen(
-          onLogIn: () => setState(() => _screen = _AuthScreen.loggedIn),
+          onLogIn: (email, password) async {
+            final error = await context.read<AppState>().logIn(
+                  email: email,
+                  password: password,
+                );
+            if (!mounted || error != null) return error;
+            setState(() => _screen = _AuthScreen.loggedIn);
+            return null;
+          },
           onCreateAccount: () => setState(() => _screen = _AuthScreen.createAccount),
         );
       case _AuthScreen.createAccount:
         return CreateAccountScreen(
           onBack: () => setState(() => _screen = _AuthScreen.welcome),
-          onCreateAccount: (name) {
-            context.read<AppState>().setName(name);
+          onCreateAccount: ({
+            required String fullName,
+            required String email,
+            required String phone,
+            required String password,
+          }) async {
+            final error = await context.read<AppState>().signUp(
+                  fullName: fullName,
+                  email: email,
+                  phone: phone,
+                  password: password,
+                );
+            if (!mounted || error != null) return error;
             setState(() => _screen = _AuthScreen.loggedIn);
+            return null;
           },
           onLogIn: () => setState(() => _screen = _AuthScreen.login),
         );
@@ -88,7 +120,11 @@ class _AuthFlowState extends State<_AuthFlow> {
             future: _loadContacts(),
             builder: (context, snapshot) {
               return _MainShell(
-                onLogOut: () => setState(() => _screen = _AuthScreen.welcome),
+                onLogOut: () async {
+                  await context.read<AppState>().logOut();
+                  if (!mounted) return;
+                  setState(() => _screen = _AuthScreen.welcome);
+                },
               );
             },
           );

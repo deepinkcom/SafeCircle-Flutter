@@ -7,17 +7,17 @@ A Flutter/Dart rebuild of the SafeCircle safety app, aligned with the
 |----------------------------|-----------|
 | Mobile UI                  | Flutter + Dart (this project) |
 | Backend API                | `lib/services/api_service.dart` — stub calls, ready to point at a FastAPI backend |
-| Authentication              | `lib/services/auth_service.dart` — stub wrapping Firebase Authentication |
+| Authentication              | `lib/services/auth_service.dart` — Firebase Authentication (email/password) |
+| User profiles               | Cloud Firestore `users/{uid}` via `lib/services/user_repository.dart` |
 | Database / geo queries      | Called from the backend (PostgreSQL + PostGIS), not from the app directly |
 | Push notifications          | `lib/services/notification_service.dart` — stub wrapping Firebase Cloud Messaging |
 | Maps & geolocation           | `lib/services/location_service.dart` — stub wrapping device GPS; see "Maps" note below |
 | Hosting / DB hosting          | Azure App Service + Azure Database for PostgreSQL (deployment target, not part of this repo) |
 
-All app data currently lives in memory (`lib/state/app_state.dart`), so the
-app is fully clickable with **zero backend setup** — every screen from the
-mockups is implemented and wired together. Each service stub documents
-exactly what to fill in to connect the real backend later, without needing
-to touch the screens themselves.
+Sign-up, sign-in, and profile edits are stored in Firebase (Authentication
+for the password, Cloud Firestore for name, email, phone, and city).
+Contacts, alerts, and location still go through the other services in
+`lib/services/`.
 
 ## Screens included
 
@@ -60,12 +60,11 @@ at the top of `mock_map.dart` and `location_service.dart`.
 
 ## Next steps for a production build
 
-- Uncomment `google_maps_flutter`, `geolocator`, `firebase_core`,
-  `firebase_auth`, `firebase_messaging`, and an HTTP client (e.g. `dio`) in
-  `pubspec.yaml` as you wire each one in.
-- Fill in the four files in `lib/services/` — each already documents the
-  intended FastAPI endpoints / Firebase calls.
-- Add Firebase config (`google-services.json` / `GoogleService-Info.plist`)
-  once you've created a Firebase project for Authentication + Cloud
-  Messaging.
+- Create a Firebase project, enable Email/Password sign-in and Cloud
+  Firestore, then from this folder run `flutterfire configure`. That
+  replaces `lib/firebase_options.dart` and adds the platform config files.
+- Publish `firestore.rules` (`firebase deploy --only firestore:rules`) so
+  each user can read and write only their own `users/{uid}` document.
+- Uncomment `google_maps_flutter` and `firebase_messaging` in `pubspec.yaml`
+  when maps and push notifications are ready.
 - Point `ApiService.baseUrl` at your deployed Azure App Service URL.
