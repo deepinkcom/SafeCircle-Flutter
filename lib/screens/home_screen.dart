@@ -35,8 +35,12 @@ class HomeScreen extends StatelessWidget {
       appBar: const TopBrandBar(),
       body: SafeArea(
         top: false,
-        child: Column(
-          children: [
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
@@ -58,33 +62,60 @@ class HomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 18),
                   Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          const MiniLocationPreview(),
-                          const SizedBox(width: 14),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Your current location', style: textTheme.bodyMedium),
-                              Text(state.currentLocation, style: textTheme.titleMedium),
-                              const SizedBox(height: 4),
-                              const Row(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const MiniLocationPreview(),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Icon(Icons.gps_fixed, color: AppColors.tealPrimary, size: 14),
-                                  SizedBox(width: 4),
-                                  Text('Accuracy: High',
-                                      style: TextStyle(color: AppColors.tealPrimary, fontSize: 12)),
+                                  Text(
+                                    'Your current location',
+                                    style: textTheme.bodyMedium,
+                                  ),
+                                  Text(
+                                    state.currentLocation.isEmpty
+                                        ? 'Finding your location...'
+                                        : state.currentLocation,
+                                    style: textTheme.titleMedium,
+                                    softWrap: true,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Row(
+                                    children: [
+                                      Icon(
+                                        Icons.gps_fixed,
+                                        color: AppColors.tealPrimary,
+                                        size: 14,
+                                      ),
+                                      SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          'Accuracy: High',
+                                          style: TextStyle(
+                                            color: AppColors.tealPrimary,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ],
                               ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                   const SizedBox(height: 28),
                 ],
               ),
@@ -125,15 +156,15 @@ class HomeScreen extends StatelessWidget {
                       onTap: onOpenAlerts,
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
-            const Spacer(),
-          ],
-        ),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  ),
+);
+}
 }
 
 class _QuickAction extends StatelessWidget {

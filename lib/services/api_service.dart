@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
 
 // Talks to the FastAPI backend (see 6.2.1 Suggested Technology Stack:
 // "Backend API - Python 3 with FastAPI").
@@ -24,9 +25,63 @@ import 'package:http/http.dart' as http;
 //                                   backed by PostGIS ST_DWithin
 
 class ApiService {
-  ApiService({this.baseUrl = 'http://10.234.234.6:8000'});
+  ApiService({this.baseUrl = 'http://192.168.0.28:8000'});
 
   final String baseUrl;
+
+    Future<Map<String, String>> _authHeaders({
+    bool jsonContent = false,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      throw Exception('Please sign in to continue.');
+    }
+
+    final idToken = await user.getIdToken();
+
+    if (idToken == null || idToken.isEmpty) {
+      throw Exception('Could not obtain a Firebase ID token.');
+    }
+
+    return {
+      'Authorization': 'Bearer $idToken',
+      if (jsonContent) 'Content-Type': 'application/json',
+    };
+  }
+
+
+  Future<Map<String, dynamic>> syncMyProfile({
+    required String name,
+    required String city,
+    required String phone,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/users/me'),
+      headers: await _authHeaders(jsonContent: true),
+      body: jsonEncode({
+        'name': name,
+        'city': city,
+        'phone': phone,
+      }),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to sync profile: '
+        '${response.statusCode} ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Unexpected profile sync response.');
+    }
+
+    return data;
+  }
+
 
   Future<int> sendPanicAlert({
   required double latitude,
@@ -34,9 +89,7 @@ class ApiService {
 }) async {
   final response = await http.post(
     Uri.parse('$baseUrl/alerts/panic'),
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: await _authHeaders(jsonContent: true),
     body: '''
 {
   "latitude": $latitude,
@@ -59,6 +112,7 @@ class ApiService {
   Future<void> resolveAlert(int alertId) async {
   final response = await http.post(
     Uri.parse('$baseUrl/alerts/$alertId/resolve'),
+    headers: await _authHeaders(),
   );
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -72,6 +126,7 @@ class ApiService {
 Future<Map<String, dynamic>> acknowledgeAlert(int alertId) async {
   final response = await http.post(
     Uri.parse('$baseUrl/alerts/$alertId/acknowledge'),
+    headers: await _authHeaders(),
   );
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -93,6 +148,7 @@ Future<Map<String, dynamic>> acknowledgeAlert(int alertId) async {
 Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
   final response = await http.get(
     Uri.parse('$baseUrl/alerts/history'),
+    headers: await _authHeaders(),
   );
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -123,7 +179,10 @@ Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
     '&radius_km=$radiusKm',
   );
 
-  final response = await http.get(uri);
+  final response = await http.get(
+  uri,
+  headers: await _authHeaders(),
+);
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw Exception(
@@ -144,6 +203,7 @@ Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
     Future<List<Map<String, dynamic>>> fetchContacts() async {
       final response = await http.get(
         Uri.parse('$baseUrl/contacts'),
+        headers: await _authHeaders(),
       );
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -170,9 +230,7 @@ Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
     }) async {
       final response = await http.post(
         Uri.parse('$baseUrl/contacts'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await _authHeaders(jsonContent: true),
         body: jsonEncode({
           'name': name,
           'relationship': relationship,
@@ -206,9 +264,7 @@ Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
     }) async {
       final response = await http.patch(
         Uri.parse('$baseUrl/contacts/$contactId'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await _authHeaders(jsonContent: true),
         body: jsonEncode({
           if (name != null) 'name': name,
           if (relationship != null) 'relationship': relationship,

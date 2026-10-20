@@ -1,19 +1,60 @@
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function ownsUserProfile(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function validUserProfile(data) {
+      return data.keys().hasAll([
+          'name',
+          'city',
+          'email',
+          'phone',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name',
+          'city',
+          'email',
+          'phone',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.name is string
+        && data.city is string
+        && data.email is string
+        && data.phone is string;
+    }
+
+    match /users/{uid} {
+      allow read: if ownsUserProfile(uid);
+
+      allow create: if ownsUserProfile(uid)
+        && validUserProfile(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if ownsUserProfile(uid)
+        && validUserProfile(request.resource.data)
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly(['name', 'city', 'phone', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
     match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2026, 11, 15);
+      allow read, write: if false;
     }
   }
 }

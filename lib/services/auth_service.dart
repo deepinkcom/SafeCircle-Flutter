@@ -1,5 +1,4 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 
 import '../firebase_bootstrap.dart';
 import '../models/models.dart';
@@ -46,7 +45,7 @@ class AuthService {
     if (!isReady) return null;
     final user = _firebaseAuth.currentUser;
     if (user == null) return null;
-    return _profileFor(user);
+    return await _profileFor(user);
   }
 
   Future<UserProfile> signUp({
@@ -107,7 +106,7 @@ class AuthService {
       if (user == null) {
         throw AuthFailure('Sign-in failed. Please try again.');
       }
-      return _profileFor(user);
+      return await _profileFor(user);
     } on AuthFailure {
       rethrow;
     } on FirebaseAuthException catch (error) {

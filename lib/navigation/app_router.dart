@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../screens/activate_panic_screen.dart';
 import '../screens/alert_history_screen.dart';
@@ -58,17 +58,31 @@ class _AuthFlowState extends State<_AuthFlow> {
     setState(() => _screen = _AuthScreen.loggedIn);
   }
 
+
   Future<void> _loadContacts() async {
-  try {
     final appState = context.read<AppState>();
-    await appState.loadContacts();
-    await appState.loadAlertHistory();
-    await appState.loadCurrentLocation();
-  } catch (error, stackTrace) {
-    debugPrint('Failed to load app data: $error');
-    debugPrint('$stackTrace');
+
+    try {
+      await appState.loadContacts();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load contacts: $error');
+      debugPrint('$stackTrace');
+    }
+
+    try {
+      await appState.loadAlertHistory();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load alert history: $error');
+      debugPrint('$stackTrace');
+    }
+
+    try {
+      await appState.loadCurrentLocation();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load current location: $error');
+      debugPrint('$stackTrace');
+    }
   }
-}
 
   @override
   Widget build(BuildContext context) {

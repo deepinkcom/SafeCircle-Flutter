@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from .alerts import router as alerts_router
 from .contacts import router as contacts_router
 from .devices import router as devices_router
-
+from .users import router as users_router
 
 app = FastAPI(
     title="SafeCircle API",
@@ -14,6 +14,7 @@ app = FastAPI(
 app.include_router(contacts_router)
 app.include_router(alerts_router)
 app.include_router(devices_router)
+app.include_router(users_router)
 
 
 @app.get("/")

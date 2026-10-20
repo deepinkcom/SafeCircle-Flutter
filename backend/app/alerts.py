@@ -1,27 +1,19 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
-from geoalchemy2 import Geography
+from fastapi import APIRouter, Depends, HTTPException, Query
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_DWithin, ST_Distance
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .database import SessionLocal
-from .models import Alert, AlertAcknowledgement
+from .auth import get_current_user, get_db
+from .models import Alert, AlertAcknowledgement, User
+
 
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 
 class PanicAlertCreate(BaseModel):
     latitude: float
@@ -29,24 +21,37 @@ class PanicAlertCreate(BaseModel):
     location_label: str | None = None
 
 
+
 @router.post("/panic")
 def create_panic_alert(
     alert_data: PanicAlertCreate,
-    user_id: int = 1,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not -90 <= alert_data.latitude <= 90:
+        raise HTTPException(
+            status_code=422,
+            detail="Latitude must be between -90 and 90",
+        )
+
+    if not -180 <= alert_data.longitude <= 180:
+        raise HTTPException(
+            status_code=422,
+            detail="Longitude must be between -180 and 180",
+        )
+
     point = WKTElement(
         f"POINT({alert_data.longitude} {alert_data.latitude})",
         srid=4326,
     )
 
     alert = Alert(
-        user_id=user_id,
+        user_id=current_user.id,
         kind="panic",
         status="active",
         location=point,
         location_label=alert_data.location_label,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
 
     db.add(alert)
@@ -68,20 +73,29 @@ def create_panic_alert(
 @router.post("/{alert_id}/resolve")
 def resolve_alert(
     alert_id: int,
-    user_id: int = 1,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     statement = select(Alert).where(
         Alert.id == alert_id,
-        Alert.user_id == user_id,
+        Alert.user_id == current_user.id,
     )
     alert = db.scalar(statement)
 
     if alert is None:
-        return {"error": "Alert not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found",
+        )
+
+    if alert.status != "active":
+        raise HTTPException(
+            status_code=409,
+            detail="Only active alerts can be resolved",
+        )
 
     alert.status = "resolved"
-    alert.resolved_at = datetime.utcnow()
+    alert.resolved_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(alert)
@@ -93,13 +107,19 @@ def resolve_alert(
         "status": alert.status,
         "location_label": alert.location_label,
         "created_at": alert.created_at.isoformat(),
-        "resolved_at": alert.resolved_at.isoformat(),
+        "resolved_at": (
+            alert.resolved_at.isoformat()
+            if alert.resolved_at
+            else None
+        ),
     }
+
+
 
 @router.post("/{alert_id}/acknowledge")
 def acknowledge_alert(
     alert_id: int,
-    user_id: int = 1,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     alert = db.scalar(
@@ -110,25 +130,49 @@ def acknowledge_alert(
     )
 
     if alert is None:
-        return {"error": "Active alert not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Active alert not found",
+        )
+
+    if alert.user_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot acknowledge your own alert",
+        )
 
     acknowledgement = db.scalar(
         select(AlertAcknowledgement).where(
             AlertAcknowledgement.alert_id == alert_id,
-            AlertAcknowledgement.responder_user_id == user_id,
+            AlertAcknowledgement.responder_user_id == current_user.id,
         )
     )
 
     if acknowledgement is None:
         acknowledgement = AlertAcknowledgement(
             alert_id=alert_id,
-            responder_user_id=user_id,
+            responder_user_id=current_user.id,
             status="on_my_way",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         db.add(acknowledgement)
-        db.commit()
-        db.refresh(acknowledgement)
+
+        try:
+            db.commit()
+            db.refresh(acknowledgement)
+        except IntegrityError:
+            db.rollback()
+            acknowledgement = db.scalar(
+                select(AlertAcknowledgement).where(
+                    AlertAcknowledgement.alert_id == alert_id,
+                    AlertAcknowledgement.responder_user_id == current_user.id,
+                )
+            )
+            if acknowledgement is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Could not record the acknowledgement",
+                )
 
     return {
         "id": acknowledgement.id,
@@ -138,14 +182,16 @@ def acknowledge_alert(
         "created_at": acknowledgement.created_at.isoformat(),
     }
 
+
+
 @router.get("/history")
 def get_alert_history(
-    user_id: int = 1,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     alert_statement = (
         select(Alert)
-        .where(Alert.user_id == user_id)
+        .where(Alert.user_id == current_user.id)
         .order_by(Alert.created_at.desc())
     )
 
@@ -154,7 +200,9 @@ def get_alert_history(
     acknowledgement_statement = (
         select(AlertAcknowledgement, Alert)
         .join(Alert, Alert.id == AlertAcknowledgement.alert_id)
-        .where(AlertAcknowledgement.responder_user_id == user_id)
+        .where(
+            AlertAcknowledgement.responder_user_id == current_user.id
+        )
         .order_by(AlertAcknowledgement.created_at.desc())
     )
 
@@ -195,11 +243,14 @@ def get_alert_history(
         reverse=True,
     )
 
+
+
 @router.get("/nearby")
 def get_nearby_alerts(
-    lat: float,
-    lng: float,
-    radius_km: float = 1,
+    lat: float = Query(ge=-90, le=90),
+    lng: float = Query(ge=-180, le=180),
+    radius_km: float = Query(default=1, gt=0, le=50),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     search_point = WKTElement(
@@ -217,6 +268,7 @@ def get_nearby_alerts(
     statement = (
         select(Alert, distance.label("distance_meters"))
         .where(
+            Alert.user_id != current_user.id,
             Alert.location.is_not(None),
             Alert.status == "active",
             ST_DWithin(

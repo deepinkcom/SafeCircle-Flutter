@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -92,23 +92,48 @@ class AppState extends ChangeNotifier {
     }
   }
 
+
   Future<String?> updateProfile({
     required String name,
     required String phone,
     required String city,
   }) async {
     try {
-      userProfile = await _auth.updateProfile(
-        userProfile.copyWith(name: name.trim(), phone: phone.trim(), city: city.trim()),
+      final updatedProfile = await _auth.updateProfile(
+        userProfile.copyWith(
+          name: name.trim(),
+          phone: phone.trim(),
+          city: city.trim(),
+        ),
       );
+
+      userProfile = updatedProfile;
       notifyListeners();
+
+      if (updatedProfile.uid.isEmpty ||
+          updatedProfile.name.trim().isEmpty ||
+          updatedProfile.email.trim().isEmpty ||
+          updatedProfile.phone.trim().isEmpty ||
+          updatedProfile.city.trim().isEmpty) {
+        return 'Your profile was saved, but some required details are missing.';
+      }
+
+      await _api.syncMyProfile(
+        name: updatedProfile.name,
+        city: updatedProfile.city,
+        phone: updatedProfile.phone,
+      );
+
       return null;
     } on AuthFailure catch (error) {
       return error.message;
-    } catch (_) {
-      return 'Something went wrong. Please try again.';
+    } catch (error) {
+      debugPrint('PROFILE SYNC ERROR: $error');
+      return 'Your profile was saved, but syncing with the server failed. '
+          'Please check your connection and try again.';
     }
   }
+
 
   Future<void> logOut() async {
     await _auth.logOut();
