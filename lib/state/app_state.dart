@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -324,19 +324,22 @@ Future<void> loadAlertHistory() async {
   notifyListeners();
 }
 
-  Future<void> startEmergency() async {
-    isEmergencyActive = true;
+
+Future<void> startEmergency() async {
+  try {
     final coords = await _location.getCurrentLocation();
+
     currentLocation = await _location.getReadableLocation(
       lat: coords.lat,
       lng: coords.lng,
     );
-    // Fire-and-forget: the panic alert is sent to the backend in the
-    // background while the UI moves straight to the "Emergency Active" screen.
+
     final backendAlertId = await _api.sendPanicAlert(
       latitude: coords.lat,
       longitude: coords.lng,
     );
+
+    isEmergencyActive = true;
 
     alertHistory.insert(
       0,
@@ -349,8 +352,15 @@ Future<void> loadAlertHistory() async {
         status: AlertStatus.active,
       ),
     );
+
     notifyListeners();
+  } catch (e, stackTrace) {
+    debugPrint('EMERGENCY: failed to start: $e');
+    debugPrintStack(stackTrace: stackTrace);
+    rethrow;
   }
+}
+
 
   Future<void> resolveEmergency() async {
     isEmergencyActive = false;

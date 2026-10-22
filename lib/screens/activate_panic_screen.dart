@@ -6,7 +6,7 @@ class ActivatePanicScreen extends StatefulWidget {
   const ActivatePanicScreen({super.key, required this.onBack, required this.onAlertSent});
 
   final VoidCallback onBack;
-  final VoidCallback onAlertSent;
+  final Future<void> Function() onAlertSent;
 
   @override
   State<ActivatePanicScreen> createState() => _ActivatePanicScreenState();
@@ -19,31 +19,82 @@ class _ActivatePanicScreenState extends State<ActivatePanicScreen> {
   Timer? _timer;
   double _progress = 0;
   bool _pressed = false;
+  bool _isSubmitting = false;
+  String? _errorMessage;
 
-  void _startHold() {
-    _timer?.cancel();
-    setState(() {
-      _pressed = true;
-      _progress = 0;
-    });
-    var elapsed = 0;
-    _timer = Timer.periodic(const Duration(milliseconds: _stepMs), (t) {
-      elapsed += _stepMs;
-      setState(() => _progress = (elapsed / _totalMs).clamp(0, 1));
-      if (elapsed >= _totalMs) {
-        t.cancel();
-        widget.onAlertSent();
-      }
-    });
-  }
+  Future<void> _submitAlert() async {
+  if (_isSubmitting) return;
 
-  void _cancelHold() {
-    _timer?.cancel();
+  setState(() {
+    _isSubmitting = true;
+    _errorMessage = null;
+  });
+
+  try {
+    await widget.onAlertSent();
+  } catch (e) {
+    if (!mounted) return;
     setState(() {
+      _errorMessage =
+          'Could not send the alert. Check your location permissions and connection, then try again.';
+      _isSubmitting = false;
       _pressed = false;
       _progress = 0;
     });
+    return;
   }
+
+  if (mounted) {
+    setState(() {
+      _isSubmitting = false;
+    });
+  }
+}
+
+
+void _startHold() {
+  if (_isSubmitting || !mounted) return;
+
+  _timer?.cancel();
+  setState(() {
+    _pressed = true;
+    _progress = 0;
+    _errorMessage = null;
+  });
+
+  var elapsed = 0;
+  _timer = Timer.periodic(const Duration(milliseconds: _stepMs), (t) {
+    if (!mounted || _isSubmitting) {
+      t.cancel();
+      return;
+    }
+
+    elapsed += _stepMs;
+
+    setState(() {
+      _progress = (elapsed / _totalMs).clamp(0.0, 1.0);
+    });
+
+    if (elapsed >= _totalMs) {
+      t.cancel();
+      _timer = null;
+      _submitAlert();
+    }
+  });
+}
+
+void _cancelHold() {
+  _timer?.cancel();
+  _timer = null;
+
+  if (!mounted || _isSubmitting) return;
+
+  setState(() {
+    _pressed = false;
+    _progress = 0;
+  });
+}
+
 
   @override
   void dispose() {
@@ -179,17 +230,30 @@ class _ActivatePanicScreenState extends State<ActivatePanicScreen> {
                       width: double.infinity,
                       height: 56,
                       child: ElevatedButton.icon(
-                        onPressed: widget.onAlertSent,
+                        onPressed: _isSubmitting ? null : _submitAlert,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.redAlert,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                         ),
                         icon: const Icon(Icons.campaign, size: 18),
-                        label: const Text('Send Alert Now',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                        label: Text(
+                          _isSubmitting ? 'Sending alert...' : 'Send Alert Now',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
+                    if (_errorMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _errorMessage!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.redAlert),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,

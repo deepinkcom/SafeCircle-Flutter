@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../screens/activate_panic_screen.dart';
 import '../screens/alert_history_screen.dart';
@@ -231,23 +231,28 @@ class _MainShellState extends State<_MainShell> {
       MaterialPageRoute(
         builder: (_) => ActivatePanicScreen(
           onBack: () => Navigator.of(context).pop(),
-          onAlertSent: () async {
-            final state = context.read<AppState>();
-            await state.startEmergency();
-            if (!mounted) return;
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => EmergencyActiveScreen(
-                  onBack: () => Navigator.of(context).pop(),
-                  onImSafe: () async {
-                    await context.read<AppState>().resolveEmergency();
-                    if (!mounted) return;
-                    Navigator.of(context).popUntil((route) => route.isFirst);
-                  },
+
+            onAlertSent: () async {
+              final state = context.read<AppState>();
+
+              await state.startEmergency();
+
+              if (!mounted) return;
+
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => EmergencyActiveScreen(
+                    onBack: () => Navigator.of(context).pop(),
+                    onImSafe: () async {
+                      await context.read<AppState>().resolveEmergency();
+                      if (!mounted) return;
+                      Navigator.of(context).popUntil((route) => route.isFirst);
+                    },
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+
         ),
       ),
     );
