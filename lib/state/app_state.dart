@@ -362,16 +362,26 @@ Future<void> startEmergency() async {
 }
 
 
+
   Future<void> resolveEmergency() async {
-    isEmergencyActive = false;
     final idx = alertHistory.indexWhere((e) => e.status == AlertStatus.active);
+
     if (idx != -1) {
       final resolvedId = alertHistory[idx].id;
-      alertHistory[idx] = alertHistory[idx].copyWith(status: AlertStatus.resolved);
+
+      // Resolve the alert on the backend first.
+      // If this fails, keep the local emergency state active.
       await _api.resolveAlert(resolvedId);
+
+      alertHistory[idx] = alertHistory[idx].copyWith(
+        status: AlertStatus.resolved,
+      );
     }
+
+    isEmergencyActive = false;
     notifyListeners();
   }
+
 
   Future<void> resolveAlertById(int alertId) async {
   final idx = alertHistory.indexWhere((e) => e.id == alertId);
