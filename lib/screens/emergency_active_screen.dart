@@ -7,10 +7,11 @@ import '../widgets/mock_map.dart';
 import '../widgets/safe_circle_mark.dart';
 
 class EmergencyActiveScreen extends StatefulWidget {
-  const EmergencyActiveScreen({super.key, required this.onBack, required this.onImSafe});
+  const EmergencyActiveScreen(
+      {super.key, required this.onBack, required this.onImSafe});
 
   final VoidCallback onBack;
-  final VoidCallback onImSafe;
+  final Future<void> Function() onImSafe;
 
   @override
   State<EmergencyActiveScreen> createState() => _EmergencyActiveScreenState();
@@ -19,6 +20,34 @@ class EmergencyActiveScreen extends StatefulWidget {
 class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
   int _elapsedSeconds = 0;
   Timer? _timer;
+  bool _isResolving = false;
+  String? _resolutionError;
+
+  Future<void> _resolveEmergency() async {
+    if (_isResolving) return;
+
+    setState(() {
+      _isResolving = true;
+      _resolutionError = null;
+    });
+
+    try {
+      await widget.onImSafe();
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _resolutionError =
+            "Couldn't confirm that you're safe. Your emergency may still be active. Please try again.";
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isResolving = false;
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -53,11 +82,13 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                 children: [
                   IconButton(
                     onPressed: widget.onBack,
-                    icon: const Icon(Icons.arrow_back, color: AppColors.navyDark),
+                    icon:
+                        const Icon(Icons.arrow_back, color: AppColors.navyDark),
                   ),
                   const SafeCircleMark(size: 26),
                   const SizedBox(width: 6),
-                  Text('SafeCircle', style: Theme.of(context).textTheme.titleMedium),
+                  Text('SafeCircle',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const Spacer(),
                   const Icon(Icons.notifications, color: AppColors.navyDark),
                   const SizedBox(width: 12),
@@ -81,10 +112,12 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                     ],
                   ),
                   const Text("We've alerted your trusted contacts.",
-                      style: TextStyle(color: AppColors.textMuted, fontSize: 14)),
+                      style:
+                          TextStyle(color: AppColors.textMuted, fontSize: 14)),
                   const SizedBox(height: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: AppColors.tealBg,
                       borderRadius: BorderRadius.circular(20),
@@ -95,7 +128,8 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                         _Dot(),
                         SizedBox(width: 6),
                         Text('Live location sharing on',
-                            style: TextStyle(color: AppColors.tealPrimary, fontSize: 12)),
+                            style: TextStyle(
+                                color: AppColors.tealPrimary, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -144,10 +178,11 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                         Container(
                           width: 36,
                           height: 36,
-                          decoration:
-                              const BoxDecoration(color: AppColors.tealBg, shape: BoxShape.circle),
+                          decoration: const BoxDecoration(
+                              color: AppColors.tealBg, shape: BoxShape.circle),
                           alignment: Alignment.center,
-                          child: const Icon(Icons.location_on, color: AppColors.tealPrimary, size: 18),
+                          child: const Icon(Icons.location_on,
+                              color: AppColors.tealPrimary, size: 18),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -155,19 +190,23 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text('Current Location',
-                                  style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                                  style: TextStyle(
+                                      color: AppColors.textMuted,
+                                      fontSize: 13)),
                               Text(state.currentLocation,
-                                  style: Theme.of(context).textTheme.titleMedium),
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium),
                             ],
                           ),
                         ),
                         Container(
                           width: 32,
                           height: 32,
-                          decoration:
-                              const BoxDecoration(color: AppColors.tealBg, shape: BoxShape.circle),
+                          decoration: const BoxDecoration(
+                              color: AppColors.tealBg, shape: BoxShape.circle),
                           alignment: Alignment.center,
-                          child: const Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 16),
+                          child: const Icon(Icons.verified_user,
+                              color: AppColors.tealPrimary, size: 16),
                         ),
                       ],
                     ),
@@ -179,7 +218,9 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text('Elapsed Time',
-                                  style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                                  style: TextStyle(
+                                      color: AppColors.textMuted,
+                                      fontSize: 13)),
                               Text(timeLabel,
                                   style: const TextStyle(
                                       color: AppColors.redAlert,
@@ -188,14 +229,17 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                             ],
                           ),
                         ),
-                        Container(width: 1, height: 36, color: AppColors.divider),
+                        Container(
+                            width: 1, height: 36, color: AppColors.divider),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text('Users Alerted',
-                                  style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                                  style: TextStyle(
+                                      color: AppColors.textMuted,
+                                      fontSize: 13)),
                               Text('$usersAlerted',
                                   style: const TextStyle(
                                       fontWeight: FontWeight.w700,
@@ -211,17 +255,38 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton.icon(
-                        onPressed: widget.onImSafe,
+                        onPressed: _isResolving ? null : _resolveEmergency,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.redAlert,
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(28)),
                         ),
                         icon: const Icon(Icons.verified_user, size: 18),
-                        label: const Text("I'm Safe",
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                        label: _isResolving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                "I'm Safe",
+                                style: TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
                       ),
                     ),
+                    if (_resolutionError != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _resolutionError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.redAlert),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
@@ -230,9 +295,11 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                         onPressed: () {},
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: AppColors.tealPrimary),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(28)),
                         ),
-                        icon: const Icon(Icons.campaign, color: AppColors.tealPrimary, size: 18),
+                        icon: const Icon(Icons.campaign,
+                            color: AppColors.tealPrimary, size: 18),
                         label: const Text('Share Update',
                             style: TextStyle(
                                 color: AppColors.tealPrimary,
@@ -258,7 +325,8 @@ class _Dot extends StatelessWidget {
     return Container(
       width: 8,
       height: 8,
-      decoration: const BoxDecoration(color: AppColors.tealPrimary, shape: BoxShape.circle),
+      decoration: const BoxDecoration(
+          color: AppColors.tealPrimary, shape: BoxShape.circle),
     );
   }
 }
@@ -272,7 +340,8 @@ class _MapFab extends StatelessWidget {
     return Container(
       width: 40,
       height: 40,
-      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+      decoration:
+          const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
       alignment: Alignment.center,
       child: Icon(icon, color: AppColors.navyDark, size: 18),
     );
