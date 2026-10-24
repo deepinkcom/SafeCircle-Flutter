@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 
 enum AlertKind { emergencySent, nearbyReceived, testSent }
@@ -24,14 +25,14 @@ class EmergencyContact {
   });
 
   EmergencyContact copyWith({bool? enabled}) => EmergencyContact(
-        id: id,
-        name: name,
-        relationship: relationship,
-        phone: phone,
-        initials: initials,
-        avatarColor: avatarColor,
-        enabled: enabled ?? this.enabled,
-      );
+    id: id,
+    name: name,
+    relationship: relationship,
+    phone: phone,
+    initials: initials,
+    avatarColor: avatarColor,
+    enabled: enabled ?? this.enabled,
+  );
 }
 
 class AlertEvent {
@@ -52,13 +53,13 @@ class AlertEvent {
   });
 
   AlertEvent copyWith({AlertStatus? status}) => AlertEvent(
-        id: id,
-        kind: kind,
-        title: title,
-        timeLabel: timeLabel,
-        locationLabel: locationLabel,
-        status: status ?? this.status,
-      );
+    id: id,
+    kind: kind,
+    title: title,
+    timeLabel: timeLabel,
+    locationLabel: locationLabel,
+    status: status ?? this.status,
+  );
 }
 
 class UserProfile {
@@ -104,11 +105,11 @@ class UserProfile {
   }
 
   Map<String, dynamic> toMap() => {
-        'name': name,
-        'city': city,
-        'email': email,
-        'phone': phone,
-      };
+    'name': name,
+    'city': city,
+    'email': email,
+    'phone': phone,
+  };
 }
 
 class NearbyPerson {
@@ -119,6 +120,10 @@ class NearbyPerson {
   final String status;
   final DateTime createdAt;
 
+  // GPS coordinates used for real map integration.
+  final double? latitude;
+  final double? longitude;
+
   const NearbyPerson({
     required this.id,
     required this.name,
@@ -126,5 +131,18 @@ class NearbyPerson {
     required this.locationLabel,
     required this.status,
     required this.createdAt,
+    this.latitude,
+    this.longitude,
   });
+
+  // Checks whether the emergency has valid GPS coordinates.
+  bool get hasValidLocation =>
+      latitude != null &&
+          longitude != null &&
+          latitude!.isFinite &&
+          longitude!.isFinite &&
+          latitude! >= -90 &&
+          latitude! <= 90 &&
+          longitude! >= -180 &&
+          longitude! <= 180;
 }
