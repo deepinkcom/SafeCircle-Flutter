@@ -1,9 +1,16 @@
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
-from geoalchemy2.functions import ST_DWithin, ST_Distance
-from pydantic import BaseModel, ConfigDict, Field
+from geoalchemy2.functions import (
+    ST_DWithin,
+    ST_Distance,
+    ST_X,
+    ST_Y,
+)
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -12,14 +19,13 @@ from .auth import get_current_user, get_db
 from .models import Alert, AlertAcknowledgement, User
 
 
-
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
 
 class PanicAlertCreate(BaseModel):
     latitude: float
     longitude: float
     location_label: str | None = None
-
 
 
 @router.post("/panic")
@@ -80,6 +86,7 @@ def resolve_alert(
         Alert.id == alert_id,
         Alert.user_id == current_user.id,
     )
+
     alert = db.scalar(statement)
 
     if alert is None:
@@ -113,7 +120,6 @@ def resolve_alert(
             else None
         ),
     }
-
 
 
 @router.post("/{alert_id}/acknowledge")
@@ -155,6 +161,7 @@ def acknowledge_alert(
             status="on_my_way",
             created_at=datetime.now(timezone.utc),
         )
+
         db.add(acknowledgement)
 
         try:
@@ -162,12 +169,15 @@ def acknowledge_alert(
             db.refresh(acknowledgement)
         except IntegrityError:
             db.rollback()
+
             acknowledgement = db.scalar(
                 select(AlertAcknowledgement).where(
                     AlertAcknowledgement.alert_id == alert_id,
-                    AlertAcknowledgement.responder_user_id == current_user.id,
+                    AlertAcknowledgement.responder_user_id
+                    == current_user.id,
                 )
             )
+
             if acknowledgement is None:
                 raise HTTPException(
                     status_code=409,
@@ -181,7 +191,6 @@ def acknowledge_alert(
         "status": acknowledgement.status,
         "created_at": acknowledgement.created_at.isoformat(),
     }
-
 
 
 @router.get("/history")
@@ -206,7 +215,9 @@ def get_alert_history(
         .order_by(AlertAcknowledgement.created_at.desc())
     )
 
-    acknowledgements = db.execute(acknowledgement_statement).all()
+    acknowledgements = db.execute(
+        acknowledgement_statement
+    ).all()
 
     history = [
         {
@@ -244,7 +255,6 @@ def get_alert_history(
     )
 
 
-
 @router.get("/nearby")
 def get_nearby_alerts(
     lat: float = Query(ge=-90, le=90),
@@ -266,7 +276,16 @@ def get_nearby_alerts(
     )
 
     statement = (
-        select(Alert, distance.label("distance_meters"))
+        select(
+            Alert,
+            distance.label("distance_meters"),
+            ST_Y(
+                Alert.location.cast(Geometry)
+            ).label("latitude"),
+            ST_X(
+                Alert.location.cast(Geometry)
+            ).label("longitude"),
+        )
         .where(
             Alert.user_id != current_user.id,
             Alert.location.is_not(None),
@@ -289,7 +308,9 @@ def get_nearby_alerts(
             "status": alert.status,
             "location_label": alert.location_label,
             "distance_km": round(distance_meters / 1000, 3),
+            "latitude": latitude,
+            "longitude": longitude,
             "created_at": alert.created_at.isoformat(),
         }
-        for alert, distance_meters in results
+        for alert, distance_meters, latitude, longitude in results
     ]

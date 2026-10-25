@@ -14,8 +14,8 @@ import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
-import '../widgets/mock_map.dart';
 import '../widgets/top_brand_bar.dart';
+import '../widgets/real_map.dart';
 
 /// Top-level app flow. Auth screens (welcome/login/create account) push on
 /// top of a root [Navigator]; once "logged in", [_MainShell] takes over and
@@ -185,7 +185,7 @@ class _MapTab extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     color: const Color(0xFFE7EEF1),
-                    child: const MockRouteMap(),
+                    child: const RealMap(),
                   ),
                 ),
               ),

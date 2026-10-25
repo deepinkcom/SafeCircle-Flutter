@@ -422,6 +422,7 @@ Future<void> startEmergency() async {
 
     debugPrint('NEARBY: first alert = $alert');
 
+
     nearbyPerson = NearbyPerson(
       id: alert['id'] as int,
       name: 'Emergency nearby',
@@ -429,7 +430,16 @@ Future<void> startEmergency() async {
       locationLabel: alert['location_label']?.toString() ?? '',
       status: alert['status']?.toString() ?? 'active',
       createdAt: DateTime.parse(alert['created_at'].toString()),
+
+      // Use actual emergency coordinates if provided by FastAPI.
+      latitude: double.tryParse(
+        alert['latitude']?.toString() ?? '',
+      ),
+      longitude: double.tryParse(
+        alert['longitude']?.toString() ?? '',
+      ),
     );
+
 
     notifyListeners();
   } catch (error, stackTrace) {
