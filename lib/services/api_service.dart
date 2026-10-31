@@ -29,7 +29,7 @@ class ApiService {
 
   final String baseUrl;
 
-    Future<Map<String, String>> _authHeaders({
+  Future<Map<String, String>> _authHeaders({
     bool jsonContent = false,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -49,7 +49,6 @@ class ApiService {
       if (jsonContent) 'Content-Type': 'application/json',
     };
   }
-
 
   Future<Map<String, dynamic>> syncMyProfile({
     required String name,
@@ -82,210 +81,259 @@ class ApiService {
     return data;
   }
 
-
   Future<int> sendPanicAlert({
-  required double latitude,
-  required double longitude,
-}) async {
-  final response = await http.post(
-    Uri.parse('$baseUrl/alerts/panic'),
-    headers: await _authHeaders(jsonContent: true),
-    body: '''
+    required double latitude,
+    required double longitude,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/alerts/panic'),
+      headers: await _authHeaders(jsonContent: true),
+      body: '''
 {
   "latitude": $latitude,
   "longitude": $longitude
 }
 ''',
-  );
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception(
-      'Failed to send panic alert: '
-      '${response.statusCode} ${response.body}',
     );
-  }
 
-  final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to send panic alert: '
+        '${response.statusCode} ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
     return data['id'] as int;
-}
+  }
 
   Future<void> resolveAlert(int alertId) async {
-  final response = await http.post(
-    Uri.parse('$baseUrl/alerts/$alertId/resolve'),
-    headers: await _authHeaders(),
-  );
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception(
-      'Failed to resolve alert: '
-      '${response.statusCode} ${response.body}',
+    final response = await http.post(
+      Uri.parse('$baseUrl/alerts/$alertId/resolve'),
+      headers: await _authHeaders(),
     );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to resolve alert: '
+        '${response.statusCode} ${response.body}',
+      );
+    }
   }
-}
 
-Future<Map<String, dynamic>> acknowledgeAlert(int alertId) async {
-  final response = await http.post(
-    Uri.parse('$baseUrl/alerts/$alertId/acknowledge'),
-    headers: await _authHeaders(),
-  );
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception(
-      'Failed to acknowledge alert: '
-      '${response.statusCode} ${response.body}',
+  Future<Map<String, dynamic>> acknowledgeAlert(int alertId) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/alerts/$alertId/acknowledge'),
+      headers: await _authHeaders(),
     );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to acknowledge alert: '
+        '${response.statusCode} ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Unexpected acknowledge alert response.');
+    }
+
+    return data;
   }
 
-  final data = jsonDecode(response.body);
-
-  if (data is! Map<String, dynamic>) {
-    throw Exception('Unexpected acknowledge alert response.');
-  }
-
-  return data;
-}
-
-Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
-  final response = await http.get(
-    Uri.parse('$baseUrl/alerts/history'),
-    headers: await _authHeaders(),
-  );
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception(
-      'Failed to fetch alert history: '
-      '${response.statusCode} ${response.body}',
+  Future<List<Map<String, dynamic>>> fetchAlertHistory() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/alerts/history'),
+      headers: await _authHeaders(),
     );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to fetch alert history: '
+        '${response.statusCode} ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! List) {
+      throw Exception('Unexpected alert history response.');
+    }
+
+    return List<Map<String, dynamic>>.from(data);
   }
-
-  final data = jsonDecode(response.body);
-
-  if (data is! List) {
-    throw Exception('Unexpected alert history response.');
-  }
-
-  return List<Map<String, dynamic>>.from(data);
-}
 
   Future<List<Map<String, dynamic>>> fetchNearbyAlerts({
-  required double latitude,
-  required double longitude,
-  double radiusKm = 1,
-}) async {
-  final uri = Uri.parse(
-    '$baseUrl/alerts/nearby'
-    '?lat=$latitude'
-    '&lng=$longitude'
-    '&radius_km=$radiusKm',
-  );
-
-  final response = await http.get(
-  uri,
-  headers: await _authHeaders(),
-);
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception(
-      'Failed to fetch nearby alerts: '
-      '${response.statusCode} ${response.body}',
+    required double latitude,
+    required double longitude,
+    double radiusKm = 1,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/alerts/nearby'
+      '?lat=$latitude'
+      '&lng=$longitude'
+      '&radius_km=$radiusKm',
     );
+
+    final response = await http.get(
+      uri,
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to fetch nearby alerts: '
+        '${response.statusCode} ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! List) {
+      throw Exception('Unexpected nearby alerts response.');
+    }
+
+    return List<Map<String, dynamic>>.from(data);
   }
 
-  final data = jsonDecode(response.body);
+  Future<List<Map<String, dynamic>>> fetchContacts() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/contacts'),
+      headers: await _authHeaders(),
+    );
 
-  if (data is! List) {
-    throw Exception('Unexpected nearby alerts response.');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to fetch contacts: '
+        '${response.statusCode} ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! List) {
+      throw Exception('Unexpected contacts response.');
+    }
+
+    return List<Map<String, dynamic>>.from(data);
   }
 
-  return List<Map<String, dynamic>>.from(data);
-}
+  Future<Map<String, dynamic>> createContact({
+    required String name,
+    required String relationship,
+    required String phone,
+    bool enabled = true,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/contacts'),
+      headers: await _authHeaders(jsonContent: true),
+      body: jsonEncode({
+        'name': name,
+        'relationship': relationship,
+        'phone': phone,
+        'enabled': enabled,
+      }),
+    );
 
-    Future<List<Map<String, dynamic>>> fetchContacts() async {
-      final response = await http.get(
-        Uri.parse('$baseUrl/contacts'),
-        headers: await _authHeaders(),
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to create contact: '
+        '${response.statusCode} ${response.body}',
       );
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          'Failed to fetch contacts: '
-          '${response.statusCode} ${response.body}',
-        );
-      }
-
-      final data = jsonDecode(response.body);
-
-      if (data is! List) {
-        throw Exception('Unexpected contacts response.');
-      }
-
-      return List<Map<String, dynamic>>.from(data);
     }
 
-    Future<Map<String, dynamic>> createContact({
-      required String name,
-      required String relationship,
-      required String phone,
-      bool enabled = true,
-    }) async {
-      final response = await http.post(
-        Uri.parse('$baseUrl/contacts'),
-        headers: await _authHeaders(jsonContent: true),
-        body: jsonEncode({
-          'name': name,
-          'relationship': relationship,
-          'phone': phone,
-          'enabled': enabled,
-        }),
-      );
+    final data = jsonDecode(response.body);
 
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          'Failed to create contact: '
-          '${response.statusCode} ${response.body}',
-        );
-      }
-
-      final data = jsonDecode(response.body);
-
-      if (data is! Map<String, dynamic>) {
-        throw Exception('Unexpected create contact response.');
-      }
-
-      return data;
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Unexpected create contact response.');
     }
 
-    Future<Map<String, dynamic>> updateContact({
-      required int contactId,
-      String? name,
-      String? relationship,
-      String? phone,
-      bool? enabled,
-    }) async {
-      final response = await http.patch(
-        Uri.parse('$baseUrl/contacts/$contactId'),
-        headers: await _authHeaders(jsonContent: true),
-        body: jsonEncode({
-          if (name != null) 'name': name,
-          if (relationship != null) 'relationship': relationship,
-          if (phone != null) 'phone': phone,
-          if (enabled != null) 'enabled': enabled,
-        }),
+    return data;
+  }
+
+  Future<Map<String, dynamic>> updateContact({
+    required int contactId,
+    String? name,
+    String? relationship,
+    String? phone,
+    bool? enabled,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl/contacts/$contactId'),
+      headers: await _authHeaders(jsonContent: true),
+      body: jsonEncode({
+        if (name != null) 'name': name,
+        if (relationship != null) 'relationship': relationship,
+        if (phone != null) 'phone': phone,
+        if (enabled != null) 'enabled': enabled,
+      }),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to update contact: '
+        '${response.statusCode} ${response.body}',
       );
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          'Failed to update contact: '
-          '${response.statusCode} ${response.body}',
-        );
-      }
-
-      final data = jsonDecode(response.body);
-
-      if (data is! Map<String, dynamic>) {
-        throw Exception('Unexpected update contact response.');
-      }
-
-      return data;
     }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Unexpected update contact response.');
+    }
+
+    return data;
+  }
+
+  Future<Map<String, dynamic>> registerDevice({
+    required String fcmToken,
+    required String platform,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/devices'),
+      headers: await _authHeaders(jsonContent: true),
+      body: jsonEncode({
+        'fcm_token': fcmToken,
+        'platform': platform,
+      }),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to register device: HTTP ${response.statusCode}',
+      );
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Unexpected device registration response.');
+    }
+
+    return data;
+  }
+
+    Future<Map<String, dynamic>> sendTestNotification() async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/test-notifications/me'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Failed to send test notification: '
+        'HTTP ${response.statusCode} ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Unexpected test notification response.');
+    }
+
+    return data;
+  }
 }

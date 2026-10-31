@@ -1,3 +1,4 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../screens/activate_panic_screen.dart';
@@ -11,6 +12,8 @@ import '../screens/login_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/welcome_screen.dart';
 import '../state/app_state.dart';
+import '../services/notification_service.dart';
+import '../firebase_bootstrap.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
@@ -44,6 +47,44 @@ class _AuthFlow extends StatefulWidget {
 enum _AuthScreen { welcome, login, createAccount, loggedIn }
 
 class _AuthFlowState extends State<_AuthFlow> {
+  bool _notificationRegistrationAttempted = false;
+  final NotificationService _notificationService = NotificationService();
+
+Future<void> _registerNotificationsSafely() async {
+  if (!FirebaseBootstrap.isReady) {
+    debugPrint('Firebase not ready; notification setup skipped.');
+    return;
+  }
+
+  try {
+    await _notificationService.startForegroundListener();
+    await _notificationService.handleNotificationTaps();
+    debugPrint('Notification listeners started.');
+  } catch (error) {
+    debugPrint('Notification listener setup skipped: $error');
+  }
+
+  if (_notificationRegistrationAttempted) return;
+  _notificationRegistrationAttempted = true;
+
+  try {
+    final settings = await _notificationService.requestPermission();
+    final status = settings.authorizationStatus;
+
+    if (status != AuthorizationStatus.authorized &&
+        status != AuthorizationStatus.provisional) {
+      debugPrint('Notifications not enabled; device registration skipped.');
+      return;
+    }
+
+    await _notificationService.registerDevice();
+    debugPrint('Notification device registration completed.');
+  } catch (error) {
+    // Backend registration failures must not block notification setup.
+    debugPrint('Notification registration skipped: $error');
+  }
+}
+
   _AuthScreen _screen = _AuthScreen.welcome;
 
   @override
@@ -55,9 +96,10 @@ class _AuthFlowState extends State<_AuthFlow> {
   Future<void> _restoreSession() async {
     final restored = await context.read<AppState>().restoreSession();
     if (!mounted || !restored) return;
+    await _registerNotificationsSafely();
+    if (!mounted) return;
     setState(() => _screen = _AuthScreen.loggedIn);
   }
-
 
   Future<void> _loadContacts() async {
     final appState = context.read<AppState>();
@@ -89,7 +131,8 @@ class _AuthFlowState extends State<_AuthFlow> {
     switch (_screen) {
       case _AuthScreen.welcome:
         return WelcomeScreen(
-          onGetStarted: () => setState(() => _screen = _AuthScreen.createAccount),
+          onGetStarted: () =>
+              setState(() => _screen = _AuthScreen.createAccount),
           onLogIn: () => setState(() => _screen = _AuthScreen.login),
         );
       case _AuthScreen.login:
@@ -100,10 +143,12 @@ class _AuthFlowState extends State<_AuthFlow> {
                   password: password,
                 );
             if (!mounted || error != null) return error;
+            await _registerNotificationsSafely();
             setState(() => _screen = _AuthScreen.loggedIn);
             return null;
           },
-          onCreateAccount: () => setState(() => _screen = _AuthScreen.createAccount),
+          onCreateAccount: () =>
+              setState(() => _screen = _AuthScreen.createAccount),
         );
       case _AuthScreen.createAccount:
         return CreateAccountScreen(
@@ -121,6 +166,7 @@ class _AuthFlowState extends State<_AuthFlow> {
                   password: password,
                 );
             if (!mounted || error != null) return error;
+            await _registerNotificationsSafely();
             setState(() => _screen = _AuthScreen.loggedIn);
             return null;
           },
@@ -128,28 +174,30 @@ class _AuthFlowState extends State<_AuthFlow> {
         );
 
       case _AuthScreen.loggedIn:
-          debugPrint('AUTH: loggedIn screen reached');
+        debugPrint('AUTH: loggedIn screen reached');
 
-          return FutureBuilder<void>(
-            future: _loadContacts(),
-            builder: (context, snapshot) {
-              return _MainShell(
-                onLogOut: () async {
-                  await context.read<AppState>().logOut();
-                  if (!mounted) return;
-                  setState(() => _screen = _AuthScreen.welcome);
-                },
-              );
-            },
-          );
+        return FutureBuilder<void>(
+          future: _loadContacts(),
+          builder: (context, snapshot) {
+            return _MainShell(
+              onLogOut: () async {
+                await context.read<AppState>().logOut();
+                if (!mounted) return;
+                setState(() => _screen = _AuthScreen.welcome);
+              },
+            );
+          },
+        );
     }
   }
 }
 
 class _MapTab extends StatelessWidget {
-  const _MapTab({required this.onActivatePanic});
+    const _MapTab({
+      required this.onActivatePanic,
+    });
 
-  final VoidCallback onActivatePanic;
+    final VoidCallback onActivatePanic;
 
   @override
   Widget build(BuildContext context) {
@@ -171,7 +219,8 @@ class _MapTab extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Map', style: Theme.of(context).textTheme.headlineMedium),
+                  Text('Map',
+                      style: Theme.of(context).textTheme.headlineMedium),
                   const Text('No active emergency right now.',
                       style: TextStyle(color: AppColors.textMuted)),
                 ],
@@ -200,11 +249,13 @@ class _MapTab extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.redAlert,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(28)),
                   ),
                   icon: const Icon(Icons.warning_rounded, size: 18),
                   label: const Text('Activate Panic Alert',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                 ),
               ),
             ),
@@ -214,6 +265,7 @@ class _MapTab extends StatelessWidget {
     );
   }
 }
+
 class _MainShell extends StatefulWidget {
   const _MainShell({required this.onLogOut});
 
@@ -231,28 +283,26 @@ class _MainShellState extends State<_MainShell> {
       MaterialPageRoute(
         builder: (_) => ActivatePanicScreen(
           onBack: () => Navigator.of(context).pop(),
+          onAlertSent: () async {
+            final state = context.read<AppState>();
 
-            onAlertSent: () async {
-              final state = context.read<AppState>();
+            await state.startEmergency();
 
-              await state.startEmergency();
+            if (!mounted) return;
 
-              if (!mounted) return;
-
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) => EmergencyActiveScreen(
-                    onBack: () => Navigator.of(context).pop(),
-                    onImSafe: () async {
-                      await context.read<AppState>().resolveEmergency();
-                      if (!mounted) return;
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    },
-                  ),
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => EmergencyActiveScreen(
+                  onBack: () => Navigator.of(context).pop(),
+                  onImSafe: () async {
+                    await context.read<AppState>().resolveEmergency();
+                    if (!mounted) return;
+                    Navigator.of(context).popUntil((route) => route.isFirst);
+                  },
                 ),
-              );
-            },
-
+              ),
+            );
+          },
         ),
       ),
     );
@@ -276,7 +326,8 @@ class _MainShellState extends State<_MainShell> {
   void _openContacts() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ContactsScreen(onBack: () => Navigator.of(context).pop()),
+        builder: (_) =>
+            ContactsScreen(onBack: () => Navigator.of(context).pop()),
       ),
     );
   }
@@ -289,15 +340,17 @@ class _MainShellState extends State<_MainShell> {
         onOpenContacts: _openContacts,
         onOpenAlerts: _openEmergencyNearby,
       ),
-    EmergencyNearbyScreen(
-      onBack: () => setState(() => _tabIndex = 0),
-      onImOnMyWay: () async {
-        await context.read<AppState>().acknowledgeNearbyAlert();
-        if (!mounted) return;
-        setState(() => _tabIndex = 0);
-      },
+      EmergencyNearbyScreen(
+        onBack: () => setState(() => _tabIndex = 0),
+        onImOnMyWay: () async {
+          await context.read<AppState>().acknowledgeNearbyAlert();
+          if (!mounted) return;
+          setState(() => _tabIndex = 0);
+        },
+      ),
+    _MapTab(
+      onActivatePanic: _openActivatePanic,
     ),
-      _MapTab(onActivatePanic: _openActivatePanic),
       const AlertHistoryScreen(),
       ProfileScreen(onOpenContacts: _openContacts, onLogOut: widget.onLogOut),
     ];

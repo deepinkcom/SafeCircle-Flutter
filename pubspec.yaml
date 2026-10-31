@@ -23,7 +23,8 @@ dependencies:
   geocoding: ^5.0.0
   flutter_map: ^8.3.2
   latlong2: ^0.10.1
-  # firebase_messaging: ^17.0.0  # matches "Firebase Cloud Messaging" in the stack
+  firebase_messaging: ^17.0.0
+  flutter_local_notifications: ^22.3.3
   # dio: ^5.4.1                  # HTTP client for the FastAPI backend
 
 dev_dependencies:

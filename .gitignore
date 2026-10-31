@@ -52,3 +52,12 @@ app.*.map.json
 
 # Backend environment/secrets
 backend/.env
+
+# Python backend testing
+.venv-backend-test/
+__pycache__/
+.pytest_cache/
+
+
+# Java heap dumps (may contain sensitive runtime data)
+*.hprof
