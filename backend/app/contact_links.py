@@ -1,5 +1,5 @@
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -188,7 +188,7 @@ def respond_to_invitation(
         select(EmergencyContactLink).where(
             EmergencyContactLink.id == link_id,
             EmergencyContactLink.invitee_user_id == current_user.id,
-        )
+        ).with_for_update()
     )
 
     if link is None:
@@ -203,7 +203,7 @@ def respond_to_invitation(
             detail="This invitation has already been processed",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     link.status = (
         "accepted"
@@ -234,7 +234,7 @@ def revoke_relationship(
                 EmergencyContactLink.invitee_user_id
                 == current_user.id,
             ),
-        )
+        ).with_for_update()
     )
 
     if link is None:
@@ -249,7 +249,7 @@ def revoke_relationship(
             detail="This relationship is no longer active",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     link.status = "revoked"
     link.revoked_at = now

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from geoalchemy2 import Geography
 from sqlalchemy import (
@@ -138,11 +138,18 @@ class EmergencyContactLink(Base):
             name="ck_emergency_contact_links_valid_status",
         ),
         Index(
-            "uq_emergency_contact_links_active_pair",
-            "inviter_user_id",
-            "invitee_user_id",
+            "uq_emergency_contact_links_active_unordered_pair",
+            text(
+                "(CASE WHEN inviter_user_id < invitee_user_id "
+                "THEN inviter_user_id ELSE invitee_user_id END)"
+            ),
+            text(
+                "(CASE WHEN inviter_user_id < invitee_user_id "
+                "THEN invitee_user_id ELSE inviter_user_id END)"
+            ),
             unique=True,
             postgresql_where=text("status IN ('pending', 'accepted')"),
+            sqlite_where=text("status IN ('pending', 'accepted')"),
         ),
     )
 
@@ -162,27 +169,30 @@ class EmergencyContactLink(Base):
         String(20),
         nullable=False,
         default="pending",
+        server_default="pending",
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
 
     responded_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
     )
 
     revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
     )

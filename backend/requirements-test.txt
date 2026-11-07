@@ -1,0 +1,4 @@
+-r requirements.txt
+alembic
+pytest
+httpx
