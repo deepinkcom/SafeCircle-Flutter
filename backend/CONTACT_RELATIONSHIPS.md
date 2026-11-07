@@ -1,4 +1,4 @@
-# Emergency contact relationships (Task 1)
+# Emergency contact relationships (Tasks 1 and 2)
 
 `emergency_contact_links` records explicit invitations between existing `users`
 rows. It is separate from the legacy phone-based `emergency_contacts` table.
@@ -36,6 +36,7 @@ explicitly accept. This flow never verifies ownership of a legacy phone number.
 | --- | --- | --- | --- |
 | Invite | `POST /contact-links/invites`, `{"email":"user@example.invalid"}` | Authenticated inviter | New `pending` row, HTTP 201 |
 | Incoming invites | `GET /contact-links/invites/incoming` | Invitee | Only that user's pending invitations |
+| Sent invites | `GET /contact-links/invites/outgoing` | Inviter | All invitations sent by the caller, including pending, accepted, rejected, and revoked history |
 | Accept/reject | `POST /contact-links/{id}/respond`, `{"action":"accept"}` or `{"action":"reject"}` | Invitee only | `pending` to `accepted`/`rejected`; records response time |
 | Eligible relationships | `GET /contact-links/relationships` | Either participant | Only accepted links involving the caller; `other_user_id` identifies the eligible other account |
 | Revoke | `DELETE /contact-links/{id}` | Either participant | `pending`/`accepted` to `revoked`; records revocation time |
@@ -61,6 +62,120 @@ trigger; direct database access remains a privileged administrative operation.
 Legacy `GET /contacts`, `POST /contacts`, and `PATCH /contacts/{id}` and the
 `EmergencyContact` model are unchanged. Legacy contacts can still exist without
 an associated SafeCircle account or relationship.
+
+## API reference (Task 2)
+
+Every operation requires a Firebase ID token in the HTTP `Authorization` header
+using the `Bearer` scheme, plus an existing linked SafeCircle user profile.
+The examples below use fictional accounts and IDs. Do not log authorization
+headers or tokens. No new migration is required for Task 2.
+
+The six routes implement seven operations; accept and reject share the existing
+response route. Request bodies reject additional fields. Invitation emails are
+trimmed and lowercased before looking up an existing user; the caller supplies
+neither inviter ID nor a phone number. Email must be 3 to 255 characters.
+
+| Operation | Example request | Success response |
+| --- | --- | --- |
+| Send invitation | `POST /contact-links/invites` with `{"email":"invitee@example.invalid"}` | `201`, one pending relationship object |
+| List received invitations | `GET /contact-links/invites/incoming` | `200`, array of the caller's pending received invitations |
+| List sent invitations | `GET /contact-links/invites/outgoing` | `200`, array of all invitations created by the caller |
+| Accept invitation | `POST /contact-links/123/respond` with `{"action":"accept"}` | `200`, relationship object with `status: accepted` and a response timestamp |
+| Reject invitation | `POST /contact-links/123/respond` with `{"action":"reject"}` | `200`, relationship object with `status: rejected` and a response timestamp |
+| Revoke relationship | `DELETE /contact-links/123` with no body | `200`, relationship object with `status: revoked` and a revocation timestamp |
+| List accepted contacts | `GET /contact-links/relationships` | `200`, array of accepted relationships involving the caller |
+
+Sent invitations include all four statuses so the inviter can track responses
+and revocations. They are ordered by `created_at` descending, then `id`
+descending for tied timestamps. Incoming invitations are ordered by creation
+time descending; accepted relationships by update time descending. All lists
+return `[]` when empty and currently return the entire matching list without
+pagination. Each list is scoped to the authenticated caller. Listing does not
+update timestamps, relationship state, or legacy contacts.
+
+### Response examples
+
+Successful mutations return the same object shape. For example, sending an
+invitation as fictional user 41 to fictional user 42 returns `201`:
+
+```json
+{
+  "id": 123,
+  "inviter_user_id": 41,
+  "invitee_user_id": 42,
+  "status": "pending",
+  "created_at": "2026-11-07T10:00:00Z",
+  "updated_at": "2026-11-07T10:00:00Z",
+  "responded_at": null,
+  "revoked_at": null,
+  "other_user_id": 42
+}
+```
+
+Each list returns an array of those objects. For example, after user 42 accepts,
+user 41's outgoing list and accepted relationship list include:
+
+```json
+[
+  {
+    "id": 123,
+    "inviter_user_id": 41,
+    "invitee_user_id": 42,
+    "status": "accepted",
+    "created_at": "2026-11-07T10:00:00Z",
+    "updated_at": "2026-11-07T10:05:00Z",
+    "responded_at": "2026-11-07T10:05:00Z",
+    "revoked_at": null,
+    "other_user_id": 42
+  }
+]
+```
+
+`other_user_id` is always relative to the caller: user 42 sees 41 in their
+incoming list and in the response when accepting or rejecting. Pending
+invitations have null response and revocation timestamps. Accepting or rejecting
+sets `responded_at` and `updated_at` to the same time, preserves `created_at`,
+and removes the row from the incoming list. Rejection returns the same object
+shape with `status: rejected`; it remains in the sender's history but is absent
+from accepted contacts.
+
+Revocation changes `status` to `revoked` and sets `revoked_at` and `updated_at`
+to the same time. Any earlier response timestamp is retained. It returns the
+object rather than `204` and does not physically delete the relationship.
+The sender still sees that row in outgoing history; neither participant sees it
+as an accepted contact. A new invitation after rejection/revocation creates a
+new relationship ID, leaving the original history intact.
+
+### Errors and status codes
+
+| Status | When | JSON detail |
+| --- | --- | --- |
+| `400` | Sending an invitation to yourself | `You cannot invite yourself` |
+| `401` | Missing Firebase token | `Missing Firebase ID token` |
+| `401` | Invalid or expired Firebase token | `Invalid or expired Firebase ID token` |
+| `401` | Decoded identity has no UID | `Invalid Firebase identity` |
+| `403` | Verified Firebase account has no SafeCircle profile | `Firebase account is not linked to a SafeCircle user profile` |
+| `404` | No registered recipient with the supplied email | `SafeCircle user not found` |
+| `404` | Invitation missing, or caller is not its invitee | `Invitation not found` |
+| `404` | Relationship missing, or caller is not a participant | `Relationship not found` |
+| `409` | Active invitation/relationship already exists in either direction | `An active relationship or invitation already exists` |
+| `409` | Competing insert loses the database uniqueness race | `An active invitation already exists` |
+| `409` | Accepting/rejecting a row that is no longer pending | `This invitation has already been processed` |
+| `409` | Revoking a rejected/revoked row | `This relationship is no longer active` |
+| `422` | Missing/invalid body fields, extra body fields, invalid action, or noninteger path ID | FastAPI validation detail array |
+
+HTTP errors use the standard `detail` envelope, for example:
+
+```json
+{"detail": "Invitation not found"}
+```
+
+Unauthorized callers receive the same `404` response as missing records on
+respond/revoke, so these operations do not disclose other users' relationships.
+Only `pending` rows can be accepted/rejected, and only `pending`/`accepted` rows
+can be revoked. No operation promotes rejected/revoked history to accepted.
+Knowing a recipient email or legacy phone number never grants authority to
+respond as that recipient or creates an automatic account link.
 
 ## Migration procedure (requires approval before development DB execution)
 

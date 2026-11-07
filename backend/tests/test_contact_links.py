@@ -14,6 +14,17 @@ from app.contacts import router as contacts_router
 from app.models import EmergencyContact, EmergencyContactLink, User
 
 
+RELATIONSHIP_REQUESTS = [
+    ("POST", "/contact-links/invites", {"email": "user2@example.invalid"}),
+    ("GET", "/contact-links/invites/incoming", None),
+    ("GET", "/contact-links/invites/outgoing", None),
+    ("GET", "/contact-links/relationships", None),
+    ("POST", "/contact-links/1/respond", {"action": "accept"}),
+    ("POST", "/contact-links/1/respond", {"action": "reject"}),
+    ("DELETE", "/contact-links/1", None),
+]
+
+
 def headers(user_id):
     return {"Authorization": f"Bearer synthetic-test-user-{user_id}"}
 
@@ -98,6 +109,68 @@ def relationships(client, user=1):
     response = client.get("/contact-links/relationships", headers=headers(user))
     assert response.status_code == 200
     return response.json()
+
+
+@pytest.mark.parametrize("user", [1, 2, 3])
+def test_outgoing_invitations_empty_for_user_without_sent_links(client, user):
+    response = client.get("/contact-links/invites/outgoing", headers=headers(user))
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.parametrize("status", ["pending", "accepted", "rejected", "revoked"])
+def test_outgoing_invitations_include_only_callers_sent_history(client, status):
+    sent = invite(client).json()
+    if status in ("accepted", "rejected"):
+        response = respond(client, sent["id"], "accept" if status == "accepted" else "reject")
+        assert response.status_code == 200
+    elif status == "revoked":
+        response = client.delete(f"/contact-links/{sent['id']}", headers=headers(1))
+        assert response.status_code == 200
+    else:
+        response = None
+    expected = response.json() if response is not None else sent
+    expected["other_user_id"] = 2  # Always relative to the sender of this list.
+    assert invite(client, 3, 1).status_code == 201  # Incoming to user 1.
+    assert invite(client, 2, 3).status_code == 201  # Unrelated to user 1.
+
+    outgoing = client.get("/contact-links/invites/outgoing", headers=headers(1))
+    assert outgoing.status_code == 200
+    assert outgoing.json() == [expected]
+    assert outgoing.json()[0]["status"] == status
+    # A caller-supplied user ID cannot expose another sender's records.
+    assert client.get(
+        "/contact-links/invites/outgoing?inviter_user_id=2", headers=headers(1),
+    ).json() == [expected]
+
+
+def test_outgoing_invitations_are_newest_first_with_stable_ties(client, database):
+    with Session(database) as db:
+        db.add_all([
+            EmergencyContactLink(
+                id=20, inviter_user_id=1, invitee_user_id=2, status="rejected",
+                created_at=datetime(2026, 1, 1),
+            ),
+            EmergencyContactLink(
+                id=21, inviter_user_id=1, invitee_user_id=2, status="revoked",
+                created_at=datetime(2026, 1, 3),
+            ),
+            EmergencyContactLink(
+                id=22, inviter_user_id=1, invitee_user_id=3, status="accepted",
+                created_at=datetime(2026, 1, 3),
+            ),
+            EmergencyContactLink(
+                id=23, inviter_user_id=1, invitee_user_id=2, status="pending",
+                created_at=datetime(2026, 1, 2),
+            ),
+        ])
+        db.commit()
+        before = db.execute(select(EmergencyContactLink.__table__)).all()
+    response = client.get("/contact-links/invites/outgoing", headers=headers(1))
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()] == [22, 21, 23, 20]
+    with Session(database) as db:
+        assert db.execute(select(EmergencyContactLink.__table__)).all() == before
 
 
 def test_create_pending_invitation(client):
@@ -188,9 +261,15 @@ def test_new_invitation_allowed_after_terminal_state(client, database, terminal)
     assert relationships(client) == []
 
 
-def test_self_invite_and_unknown_account_are_rejected(client):
-    assert invite(client, 1, 1).status_code == 400
-    assert invite(client, 1, 99).status_code == 404
+def test_self_invite_and_unknown_account_are_rejected(client, database):
+    self_invite = invite(client, 1, 1)
+    assert self_invite.status_code == 400
+    assert self_invite.json() == {"detail": "You cannot invite yourself"}
+    unknown = invite(client, 1, 99)
+    assert unknown.status_code == 404
+    assert unknown.json() == {"detail": "SafeCircle user not found"}
+    with Session(database) as db:
+        assert db.scalars(select(EmergencyContactLink)).all() == []
 
 
 @pytest.mark.parametrize("user", [1, 3])
@@ -223,18 +302,18 @@ def test_terminal_transitions_cannot_be_replayed(client, terminal_action):
         assert client.delete(f"/contact-links/{link_id}", headers=headers(1)).status_code == 409
 
 
-@pytest.mark.parametrize("method,path,payload", [
-    ("POST", "/contact-links/invites", {"email": "user2@example.invalid"}),
-    ("GET", "/contact-links/invites/incoming", None),
-    ("GET", "/contact-links/relationships", None),
-    ("POST", "/contact-links/1/respond", {"action": "accept"}),
-    ("DELETE", "/contact-links/1", None),
-])
+@pytest.mark.parametrize("method,path,payload", RELATIONSHIP_REQUESTS)
 def test_all_relationship_routes_require_authentication(client, method, path, payload):
-    assert client.request(method, path, json=payload).status_code == 401
-    assert client.request(
+    missing = client.request(method, path, json=payload)
+    assert missing.status_code == 401
+    assert missing.json() == {"detail": "Missing Firebase ID token"}
+    assert missing.headers["www-authenticate"] == "Bearer"
+    invalid = client.request(
         method, path, json=payload, headers={"Authorization": "Bearer invalid-synthetic-identity"},
-    ).status_code == 401
+    )
+    assert invalid.status_code == 401
+    assert invalid.json() == {"detail": "Invalid or expired Firebase ID token"}
+    assert invalid.headers["www-authenticate"] == "Bearer"
 
 
 def test_invalid_action_and_identity_spoofing_are_rejected(client):
@@ -331,12 +410,71 @@ def test_competing_reverse_insert_returns_conflict_and_rolls_back(client, databa
     assert invite(client, 1, 3).status_code == 201
 
 
-def test_unlinked_firebase_identity_cannot_create_invitation(client, monkeypatch):
+@pytest.mark.parametrize("method,path,payload", RELATIONSHIP_REQUESTS)
+def test_unlinked_firebase_identity_cannot_access_relationship_routes(
+    client, monkeypatch, method, path, payload,
+):
     monkeypatch.setattr(
         "app.auth.firebase_auth.verify_id_token",
         lambda token: {"uid": "synthetic-unlinked-user"},
     )
-    assert invite(client).status_code == 403
+    response = client.request(method, path, json=payload, headers=headers(1))
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Firebase account is not linked to a SafeCircle user profile",
+    }
+
+
+@pytest.mark.parametrize("action", ["accept", "reject"])
+def test_missing_invitation_returns_not_found(client, action):
+    response = respond(client, 9999, action)
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Invitation not found"}
+
+
+def test_missing_relationship_returns_not_found(client):
+    response = client.delete("/contact-links/9999", headers=headers(1))
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Relationship not found"}
+
+
+@pytest.mark.parametrize("method,path,payload", [
+    ("POST", "/contact-links/invites", {}),
+    ("POST", "/contact-links/invites", {"email": "x"}),
+    ("POST", "/contact-links/1/respond", {}),
+    ("POST", "/contact-links/1/respond", {"action": "accepted"}),
+    ("POST", "/contact-links/1/respond", {"action": "accept", "invitee_user_id": 2}),
+    ("POST", "/contact-links/not-an-id/respond", {"action": "accept"}),
+    ("DELETE", "/contact-links/not-an-id", None),
+])
+def test_invalid_relationship_requests_return_validation_errors(client, database, method, path, payload):
+    response = client.request(method, path, json=payload, headers=headers(1))
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+    with Session(database) as db:
+        assert db.scalars(select(EmergencyContactLink)).all() == []
+
+
+def test_invitation_email_is_normalized(client):
+    response = client.post(
+        "/contact-links/invites", headers=headers(1),
+        json={"email": " USER2@EXAMPLE.INVALID "},
+    )
+    assert response.status_code == 201
+    assert response.json()["invitee_user_id"] == 2
+
+
+@pytest.mark.parametrize("action", ["accept", "reject"])
+def test_unauthorized_response_does_not_change_invitation(client, database, action):
+    link_id = invite(client).json()["id"]
+    with database.connect() as connection:
+        before = connection.execute(select(EmergencyContactLink.__table__)).all()
+    for user in (1, 3):
+        response = respond(client, link_id, action, user)
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Invitation not found"}
+    with database.connect() as connection:
+        assert connection.execute(select(EmergencyContactLink.__table__)).all() == before
 
 
 @pytest.mark.parametrize("operation", ["respond", "revoke"])

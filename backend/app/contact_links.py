@@ -150,6 +150,28 @@ def get_incoming_invitations(
     ]
 
 
+@router.get("/invites/outgoing")
+def get_outgoing_invitations(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    statement = (
+        select(EmergencyContactLink)
+        .where(EmergencyContactLink.inviter_user_id == current_user.id)
+        .order_by(
+            EmergencyContactLink.created_at.desc(),
+            EmergencyContactLink.id.desc(),
+        )
+    )
+
+    links = db.scalars(statement).all()
+
+    return [
+        _link_response(link, current_user.id)
+        for link in links
+    ]
+
+
 @router.get("/relationships")
 def get_relationships(
     current_user: User = Depends(get_current_user),
