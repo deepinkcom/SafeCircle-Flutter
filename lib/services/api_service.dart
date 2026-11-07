@@ -40,8 +40,6 @@ class ApiService {
 
     final idToken = await user.getIdToken();
 
-    print('SAFECIRCLE_DEBUG_TOKEN: $idToken');
-
     if (idToken == null || idToken.isEmpty) {
       throw Exception('Could not obtain a Firebase ID token.');
     }

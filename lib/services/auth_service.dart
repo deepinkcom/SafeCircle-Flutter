@@ -109,12 +109,6 @@ Future<UserProfile> logIn({
       throw AuthFailure('Sign-in failed. Please try again.');
     }
 
-    // TEMPORARY: Verify the Firebase session
-    print('--- SAFECIRCLE SESSION CHECK ---');
-    print('SIGNED IN EMAIL: ${user.email}');
-    print('SIGNED IN UID: ${user.uid}');
-    print('-------------------------------');
-
     return await _profileFor(user);
   } on AuthFailure {
     rethrow;
