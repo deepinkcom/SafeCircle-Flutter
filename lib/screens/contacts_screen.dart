@@ -5,83 +5,85 @@ import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 
 class ContactsScreen extends StatelessWidget {
-  const ContactsScreen({super.key, required this.onBack});
+  const ContactsScreen(
+      {super.key, required this.onBack, this.onOpenConnections});
 
   final VoidCallback onBack;
+  final VoidCallback? onOpenConnections;
 
   void _showEditContactDialog(
-  BuildContext context,
-  EmergencyContact contact,
-) {
-  final nameCtrl = TextEditingController(text: contact.name);
-  final relCtrl = TextEditingController(text: contact.relationship);
-  final phoneCtrl = TextEditingController(text: contact.phone);
+    BuildContext context,
+    EmergencyContact contact,
+  ) {
+    final nameCtrl = TextEditingController(text: contact.name);
+    final relCtrl = TextEditingController(text: contact.relationship);
+    final phoneCtrl = TextEditingController(text: contact.phone);
 
-  showDialog<void>(
-    context: context,
-    builder: (dialogContext) {
-      return AlertDialog(
-        title: const Text(
-          'Edit Contact',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(labelText: 'Full name'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: relCtrl,
-              decoration: const InputDecoration(labelText: 'Relationship'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: phoneCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Phone number'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: AppColors.textMuted),
-            ),
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text(
+            'Edit Contact',
+            style: TextStyle(fontWeight: FontWeight.w700),
           ),
-          TextButton(
-            onPressed: () async {
-              if (nameCtrl.text.trim().isEmpty) return;
-
-              await context.read<AppState>().editContact(
-                    contact.id,
-                    nameCtrl.text.trim(),
-                    relCtrl.text.trim().isEmpty
-                        ? 'Contact'
-                        : relCtrl.text.trim(),
-                    phoneCtrl.text.trim(),
-                  );
-
-              if (!dialogContext.mounted) return;
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text(
-              'Save',
-              style: TextStyle(
-                color: AppColors.tealPrimary,
-                fontWeight: FontWeight.w600,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Full name'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: relCtrl,
+                decoration: const InputDecoration(labelText: 'Relationship'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone number'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: AppColors.textMuted),
               ),
             ),
-          ),
-        ],
-      );
-    },
-  );
-}
+            TextButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty) return;
+
+                await context.read<AppState>().editContact(
+                      contact.id,
+                      nameCtrl.text.trim(),
+                      relCtrl.text.trim().isEmpty
+                          ? 'Contact'
+                          : relCtrl.text.trim(),
+                      phoneCtrl.text.trim(),
+                    );
+
+                if (!dialogContext.mounted) return;
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text(
+                'Save',
+                style: TextStyle(
+                  color: AppColors.tealPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -97,9 +99,10 @@ class ContactsScreen extends StatelessWidget {
               child: Row(
                 children: [
                   IconButton(
-                      onPressed: onBack,
-                      icon: const Icon(Icons.arrow_back, color: AppColors.navyDark),
-                    ),
+                    onPressed: onBack,
+                    icon:
+                        const Icon(Icons.arrow_back, color: AppColors.navyDark),
+                  ),
                   const Spacer(),
                   const Icon(Icons.notifications, color: AppColors.navyDark),
                   const SizedBox(width: 12),
@@ -123,6 +126,20 @@ class ContactsScreen extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 children: [
+                  if (onOpenConnections != null) ...[
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.people_outline,
+                            color: AppColors.tealPrimary),
+                        title: const Text('SafeCircle Connections'),
+                        subtitle: const Text(
+                            'Invitations and registered members. Separate from phone contacts.'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: onOpenConnections,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   for (final contact in state.contacts) ...[
                     _ContactCard(
                       contact: contact,
@@ -138,28 +155,33 @@ class ContactsScreen extends StatelessWidget {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.navyDark,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(28)),
                       ),
                       icon: const Icon(Icons.add),
                       label: const Text('Add Contact',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600)),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Card(
                     color: AppColors.tealBg,
                     elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
                     child: const Padding(
                       padding: EdgeInsets.all(14),
                       child: Row(
                         children: [
-                          Icon(Icons.verified_user, color: AppColors.tealPrimary),
+                          Icon(Icons.verified_user,
+                              color: AppColors.tealPrimary),
                           SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'These contacts can be notified during an active emergency.',
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                              style: TextStyle(
+                                  color: AppColors.textMuted, fontSize: 13),
                             ),
                           ),
                         ],
@@ -185,13 +207,18 @@ class ContactsScreen extends StatelessWidget {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Add Contact', style: TextStyle(fontWeight: FontWeight.w700)),
+          title: const Text('Add Contact',
+              style: TextStyle(fontWeight: FontWeight.w700)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Full name')),
+              TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Full name')),
               const SizedBox(height: 10),
-              TextField(controller: relCtrl, decoration: const InputDecoration(labelText: 'Relationship')),
+              TextField(
+                  controller: relCtrl,
+                  decoration: const InputDecoration(labelText: 'Relationship')),
               const SizedBox(height: 10),
               TextField(
                 controller: phoneCtrl,
@@ -203,23 +230,28 @@ class ContactsScreen extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+              child: const Text('Cancel',
+                  style: TextStyle(color: AppColors.textMuted)),
             ),
             TextButton(
               onPressed: () async {
-                  if (nameCtrl.text.trim().isNotEmpty) {
-                    await context.read<AppState>().addContact(
-                          nameCtrl.text.trim(),
-                          relCtrl.text.trim().isEmpty ? 'Contact' : relCtrl.text.trim(),
-                          phoneCtrl.text.trim(),
-                        );
+                if (nameCtrl.text.trim().isNotEmpty) {
+                  await context.read<AppState>().addContact(
+                        nameCtrl.text.trim(),
+                        relCtrl.text.trim().isEmpty
+                            ? 'Contact'
+                            : relCtrl.text.trim(),
+                        phoneCtrl.text.trim(),
+                      );
 
-                    if (!dialogContext.mounted) return;
-                    Navigator.of(dialogContext).pop();
-              }
-            },
+                  if (!dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
+                }
+              },
               child: const Text('Add',
-                  style: TextStyle(color: AppColors.tealPrimary, fontWeight: FontWeight.w600)),
+                  style: TextStyle(
+                      color: AppColors.tealPrimary,
+                      fontWeight: FontWeight.w600)),
             ),
           ],
         );
@@ -230,12 +262,12 @@ class ContactsScreen extends StatelessWidget {
 
 class _ContactCard extends StatelessWidget {
   const _ContactCard({
-  required this.contact,
-  required this.onEdit,
-});
+    required this.contact,
+    required this.onEdit,
+  });
 
-final EmergencyContact contact;
-final VoidCallback onEdit;
+  final EmergencyContact contact;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -248,38 +280,46 @@ final VoidCallback onEdit;
             Container(
               width: 48,
               height: 48,
-              decoration: BoxDecoration(color: contact.avatarColor, shape: BoxShape.circle),
+              decoration: BoxDecoration(
+                  color: contact.avatarColor, shape: BoxShape.circle),
               alignment: Alignment.center,
               child: Text(contact.initials,
-                  style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.navyDark)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, color: AppColors.navyDark)),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(contact.name, style: Theme.of(context).textTheme.titleMedium),
-                  Text(contact.relationship, style: Theme.of(context).textTheme.bodyMedium),
+                  Text(contact.name,
+                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(contact.relationship,
+                      style: Theme.of(context).textTheme.bodyMedium),
                   Row(
                     children: [
-                      const Icon(Icons.call, color: AppColors.textMuted, size: 13),
+                      const Icon(Icons.call,
+                          color: AppColors.textMuted, size: 13),
                       const SizedBox(width: 4),
-                      Text(contact.phone,
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                      Expanded(
+                          child: Text(contact.phone,
+                              style: const TextStyle(
+                                  color: AppColors.textMuted, fontSize: 13))),
                     ],
                   ),
                 ],
               ),
             ),
             IconButton(
+              tooltip: 'Edit phone contact',
               onPressed: onEdit,
               icon: const Icon(Icons.edit, color: AppColors.textMuted),
             ),
             Switch(
               value: contact.enabled,
               onChanged: (_) async {
-                  await context.read<AppState>().toggleContact(contact.id);
-                },
+                await context.read<AppState>().toggleContact(contact.id);
+              },
             ),
           ],
         ),

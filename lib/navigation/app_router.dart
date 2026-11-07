@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../screens/activate_panic_screen.dart';
 import '../screens/alert_history_screen.dart';
 import '../screens/contacts_screen.dart';
+import '../screens/contact_links_screen.dart';
+import '../screens/invite_contact_screen.dart';
 import '../screens/create_account_screen.dart';
 import '../screens/emergency_active_screen.dart';
 import '../screens/emergency_nearby_screen.dart';
@@ -48,44 +50,60 @@ enum _AuthScreen { welcome, login, createAccount, loggedIn }
 
 class _AuthFlowState extends State<_AuthFlow> {
   bool _notificationRegistrationAttempted = false;
+  Future<void>? _initialData;
   final NotificationService _notificationService = NotificationService();
 
-Future<void> _registerNotificationsSafely() async {
-  if (!FirebaseBootstrap.isReady) {
-    debugPrint('Firebase not ready; notification setup skipped.');
-    return;
-  }
-
-  try {
-    await _notificationService.startForegroundListener();
-    await _notificationService.handleNotificationTaps();
-    debugPrint('Notification listeners started.');
-  } catch (error) {
-    debugPrint('Notification listener setup skipped: $error');
-  }
-
-  if (_notificationRegistrationAttempted) return;
-  _notificationRegistrationAttempted = true;
-
-  try {
-    final settings = await _notificationService.requestPermission();
-    final status = settings.authorizationStatus;
-
-    if (status != AuthorizationStatus.authorized &&
-        status != AuthorizationStatus.provisional) {
-      debugPrint('Notifications not enabled; device registration skipped.');
+  Future<void> _registerNotificationsSafely() async {
+    if (!FirebaseBootstrap.isReady) {
+      debugPrint('Firebase not ready; notification setup skipped.');
       return;
     }
 
-    await _notificationService.registerDevice();
-    debugPrint('Notification device registration completed.');
-  } catch (error) {
-    // Backend registration failures must not block notification setup.
-    debugPrint('Notification registration skipped: $error');
+    try {
+      await _notificationService.startForegroundListener();
+      await _notificationService.handleNotificationTaps();
+      debugPrint('Notification listeners started.');
+    } catch (error) {
+      debugPrint('Notification listener setup skipped: $error');
+    }
+
+    if (_notificationRegistrationAttempted) return;
+    _notificationRegistrationAttempted = true;
+
+    try {
+      final settings = await _notificationService.requestPermission();
+      final status = settings.authorizationStatus;
+
+      if (status != AuthorizationStatus.authorized &&
+          status != AuthorizationStatus.provisional) {
+        debugPrint('Notifications not enabled; device registration skipped.');
+        return;
+      }
+
+      await _notificationService.registerDevice();
+      debugPrint('Notification device registration completed.');
+    } catch (error) {
+      // Backend registration failures must not block notification setup.
+      debugPrint('Notification registration skipped: $error');
+    }
   }
-}
 
   _AuthScreen _screen = _AuthScreen.welcome;
+
+  void _enterMain() {
+    if (!mounted) return;
+    _initialData = _loadContacts();
+    setState(() => _screen = _AuthScreen.loggedIn);
+  }
+
+  Future<void> _leaveMain({bool signInAgain = false}) async {
+    await context.read<AppState>().logOut();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    setState(
+        () => _screen = signInAgain ? _AuthScreen.login : _AuthScreen.welcome);
+  }
 
   @override
   void initState() {
@@ -98,7 +116,7 @@ Future<void> _registerNotificationsSafely() async {
     if (!mounted || !restored) return;
     await _registerNotificationsSafely();
     if (!mounted) return;
-    setState(() => _screen = _AuthScreen.loggedIn);
+    _enterMain();
   }
 
   Future<void> _loadContacts() async {
@@ -144,7 +162,7 @@ Future<void> _registerNotificationsSafely() async {
                 );
             if (!mounted || error != null) return error;
             await _registerNotificationsSafely();
-            setState(() => _screen = _AuthScreen.loggedIn);
+            _enterMain();
             return null;
           },
           onCreateAccount: () =>
@@ -167,7 +185,7 @@ Future<void> _registerNotificationsSafely() async {
                 );
             if (!mounted || error != null) return error;
             await _registerNotificationsSafely();
-            setState(() => _screen = _AuthScreen.loggedIn);
+            _enterMain();
             return null;
           },
           onLogIn: () => setState(() => _screen = _AuthScreen.login),
@@ -177,14 +195,11 @@ Future<void> _registerNotificationsSafely() async {
         debugPrint('AUTH: loggedIn screen reached');
 
         return FutureBuilder<void>(
-          future: _loadContacts(),
+          future: _initialData,
           builder: (context, snapshot) {
             return _MainShell(
-              onLogOut: () async {
-                await context.read<AppState>().logOut();
-                if (!mounted) return;
-                setState(() => _screen = _AuthScreen.welcome);
-              },
+              onLogOut: () => _leaveMain(),
+              onSignInAgain: () => _leaveMain(signInAgain: true),
             );
           },
         );
@@ -193,11 +208,11 @@ Future<void> _registerNotificationsSafely() async {
 }
 
 class _MapTab extends StatelessWidget {
-    const _MapTab({
-      required this.onActivatePanic,
-    });
+  const _MapTab({
+    required this.onActivatePanic,
+  });
 
-    final VoidCallback onActivatePanic;
+  final VoidCallback onActivatePanic;
 
   @override
   Widget build(BuildContext context) {
@@ -267,9 +282,10 @@ class _MapTab extends StatelessWidget {
 }
 
 class _MainShell extends StatefulWidget {
-  const _MainShell({required this.onLogOut});
+  const _MainShell({required this.onLogOut, required this.onSignInAgain});
 
   final VoidCallback onLogOut;
+  final Future<void> Function() onSignInAgain;
 
   @override
   State<_MainShell> createState() => _MainShellState();
@@ -326,10 +342,44 @@ class _MainShellState extends State<_MainShell> {
   void _openContacts() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            ContactsScreen(onBack: () => Navigator.of(context).pop()),
+        builder: (_) => ContactsScreen(
+            onBack: () => Navigator.of(context).pop(),
+            onOpenConnections: _openConnections),
       ),
     );
+  }
+
+  Future<void> _openConnectionProfile() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Account recovery')),
+        body: ProfileScreen(
+            onOpenContacts: _openContacts, onLogOut: widget.onLogOut),
+      ),
+    ));
+  }
+
+  Future<void> _openInvite() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => ChangeNotifierProvider.value(
+        value: context.read<AppState>().contactLinks,
+        child: InviteContactScreen(
+            onSignIn: widget.onSignInAgain,
+            onCompleteProfile: _openConnectionProfile),
+      ),
+    ));
+  }
+
+  void _openConnections() {
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => ChangeNotifierProvider.value(
+        value: context.read<AppState>().contactLinks,
+        child: ContactLinksScreen(
+            onInvite: _openInvite,
+            onSignIn: widget.onSignInAgain,
+            onCompleteProfile: _openConnectionProfile),
+      ),
+    ));
   }
 
   @override
@@ -348,9 +398,9 @@ class _MainShellState extends State<_MainShell> {
           setState(() => _tabIndex = 0);
         },
       ),
-    _MapTab(
-      onActivatePanic: _openActivatePanic,
-    ),
+      _MapTab(
+        onActivatePanic: _openActivatePanic,
+      ),
       const AlertHistoryScreen(),
       ProfileScreen(onOpenContacts: _openContacts, onLogOut: widget.onLogOut),
     ];

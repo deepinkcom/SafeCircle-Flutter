@@ -120,6 +120,9 @@ class ContactLinksState extends ChangeNotifier {
   ApiFailure? _accessFailure;
 
   String? get userId => _userId;
+
+  /// Changes even when the same account signs out and back in.
+  int get sessionVersion => _sessionGeneration;
   String get searchEmail => _searchEmail;
   String? get invitationEmail => _invitationEmail;
   ContactLinksLoadState<RegisteredUser> get search => _search;
@@ -403,6 +406,11 @@ class ContactLinksState extends ChangeNotifier {
       _mutate(_MutationKind.reject, linkId: linkId);
   Future<ContactLinkMutationResult> revokeRelationship(int linkId) =>
       _mutate(_MutationKind.revoke, linkId: linkId);
+
+  /// Read-only eligibility information for invitation button presentation.
+  /// The mutation entry point still enforces this check independently.
+  bool hasActiveInvitationOrRelationship(String email) =>
+      _activeEmail(email.trim());
 
   bool _activeEmail(String email) => [
         ..._incoming.items,

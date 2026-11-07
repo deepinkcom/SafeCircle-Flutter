@@ -19,6 +19,38 @@ void main() {
   });
   tearDown(() => state.dispose());
 
+  test(
+      'read-only eligibility matches active emails case-insensitively and session version detects re-entry',
+      () async {
+    final version = state.sessionVersion;
+    state.setSession(null);
+    state.setSession('alice');
+    expect(state.sessionVersion, greaterThan(version));
+    for (final status in [
+      'pending',
+      'accepted',
+      'rejected',
+      'revoked',
+      'future'
+    ]) {
+      api.outgoingData = [testLink(1, status, incoming: false)];
+      await state.loadOutgoingInvitations();
+      expect(
+          state.hasActiveInvitationOrRelationship(' MEMBER@example.invalid '),
+          status == 'pending' || status == 'accepted');
+    }
+    api.outgoingData = [
+      ContactLink.fromJson({
+        ...testLink(1, 'pending').toJson(),
+        'other_user': null,
+      })
+    ];
+    await state.loadOutgoingInvitations();
+    expect(state.hasActiveInvitationOrRelationship('member@example.invalid'),
+        isFalse);
+    expect(api.sendCalls, 0);
+  });
+
   test('starts with independent unloaded snapshots and no HTTP calls', () {
     expect(state.search.items, isEmpty);
     expect(state.incoming.hasLoaded, isFalse);
