@@ -92,27 +92,37 @@ class AuthService {
     }
   }
 
-  Future<UserProfile> logIn({
-    required String email,
-    required String password,
-  }) async {
-    _ensureReady();
-    try {
-      final credential = await _firebaseAuth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
-      final user = credential.user;
-      if (user == null) {
-        throw AuthFailure('Sign-in failed. Please try again.');
-      }
-      return await _profileFor(user);
-    } on AuthFailure {
-      rethrow;
-    } on FirebaseAuthException catch (error) {
-      throw AuthFailure(_authMessage(error));
+
+Future<UserProfile> logIn({
+  required String email,
+  required String password,
+}) async {
+  _ensureReady();
+  try {
+    final credential = await _firebaseAuth.signInWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+
+    final user = credential.user;
+    if (user == null) {
+      throw AuthFailure('Sign-in failed. Please try again.');
     }
+
+    // TEMPORARY: Verify the Firebase session
+    print('--- SAFECIRCLE SESSION CHECK ---');
+    print('SIGNED IN EMAIL: ${user.email}');
+    print('SIGNED IN UID: ${user.uid}');
+    print('-------------------------------');
+
+    return await _profileFor(user);
+  } on AuthFailure {
+    rethrow;
+  } on FirebaseAuthException catch (error) {
+    throw AuthFailure(_authMessage(error));
   }
+}
+
 
   Future<UserProfile> updateProfile(UserProfile profile) async {
     _ensureReady();

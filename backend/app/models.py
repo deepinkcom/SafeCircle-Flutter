@@ -1,7 +1,16 @@
 from datetime import datetime
 
 from geoalchemy2 import Geography
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -108,4 +117,72 @@ class Device(Base):
         DateTime,
         default=datetime.utcnow,
         nullable=False,
+    )
+
+    
+class EmergencyContactLink(Base):
+    """
+    Represents an invitation or accepted emergency-contact relationship
+    between two registered SafeCircle users.
+    """
+
+    __tablename__ = "emergency_contact_links"
+
+    __table_args__ = (
+        CheckConstraint(
+            "inviter_user_id != invitee_user_id",
+            name="ck_emergency_contact_links_no_self_invite",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'rejected', 'revoked')",
+            name="ck_emergency_contact_links_valid_status",
+        ),
+        Index(
+            "uq_emergency_contact_links_active_pair",
+            "inviter_user_id",
+            "invitee_user_id",
+            unique=True,
+            postgresql_where=text("status IN ('pending', 'accepted')"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    inviter_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    invitee_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
     )
