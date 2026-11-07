@@ -61,3 +61,4 @@ __pycache__/
 
 # Java heap dumps (may contain sensitive runtime data)
 *.hprof
+/database-backups/
