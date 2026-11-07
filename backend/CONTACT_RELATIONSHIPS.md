@@ -108,7 +108,12 @@ invitation as fictional user 41 to fictional user 42 returns `201`:
   "updated_at": "2026-11-07T10:00:00Z",
   "responded_at": null,
   "revoked_at": null,
-  "other_user_id": 42
+  "other_user_id": 42,
+  "other_user": {
+    "id": 42,
+    "name": "Example Invitee",
+    "email": "invitee@example.invalid"
+  }
 }
 ```
 
@@ -126,7 +131,12 @@ user 41's outgoing list and accepted relationship list include:
     "updated_at": "2026-11-07T10:05:00Z",
     "responded_at": "2026-11-07T10:05:00Z",
     "revoked_at": null,
-    "other_user_id": 42
+    "other_user_id": 42,
+    "other_user": {
+      "id": 42,
+      "name": "Example Invitee",
+      "email": "invitee@example.invalid"
+    }
   }
 ]
 ```
@@ -145,6 +155,63 @@ object rather than `204` and does not physically delete the relationship.
 The sender still sees that row in outgoing history; neither participant sees it
 as an accepted contact. A new invitation after rejection/revocation creates a
 new relationship ID, leaving the original history intact.
+
+### Relationship identity response contract
+
+All six contact-link routes use the same `ContactLinkResponse` schema in
+OpenAPI/Swagger. Mutation routes return one object; list routes return arrays
+of those objects. Every existing response field is retained. The only added
+field is `other_user`, a required response key whose value is the other
+participant's identity object or `null` when that identity is unavailable.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | integer | Relationship/invitation ID; use this in respond/revoke paths |
+| `inviter_user_id` | integer | Backend user ID of the inviter |
+| `invitee_user_id` | integer | Backend user ID of the invitee |
+| `other_user_id` | integer | The other participant's backend user ID, relative to the caller |
+| `status` | string | `pending`, `accepted`, `rejected`, or `revoked` |
+| `created_at` | ISO date-time string | Original creation time |
+| `updated_at` | ISO date-time string | Latest application transition time |
+| `responded_at` | ISO date-time string or null | Acceptance/rejection time |
+| `revoked_at` | ISO date-time string or null | Revocation time |
+| `other_user` | object or null | Only `{id: integer, name: string, email: string}` |
+
+When populated, `other_user.id` always equals `other_user_id` and differs from
+the caller's backend ID. Creation and outgoing history show the invitee;
+incoming invitations and accept/reject responses show the inviter. Accepted
+relationships and revocation responses show whichever participant is not the
+caller. This also applies to rejected and revoked records retained in outgoing
+history. Name and email come from the current registered profile, not a saved
+copy taken when the invitation was created.
+
+Only an authenticated, authorized participant can obtain this identity.
+Incoming/outgoing/accepted lists retain their existing caller filters. Only the
+invitee may respond, and only participants may revoke. A serializer guard also
+verifies membership before loading identities. No Firebase UID, phone, city,
+profile creation time, or unrelated user's identity is included. This extension
+does not add a user directory or expand the discovery endpoint's response.
+
+Nonempty relationship lists load all counterparties in one additional batch
+query selecting only user ID, name, and email. They do not query once per row.
+Empty lists perform no identity query. Foreign keys normally prevent orphaned
+relationships and cascade link deletion when a user is deleted. If a stale or
+inconsistent record nevertheless has no matching counterparty, or its supplied
+identity does not match the expected ID, `other_user` is `null`. Original
+relationship metadata, including `other_user_id`, remains; no unrelated profile
+or caller profile is substituted, and no records are repaired or changed.
+Timestamp formatting, HTTP status codes, lifecycle transitions, and list
+ordering remain unchanged. No schema change or migration is required.
+
+For Flutter, parse `other_user` as nullable and display its `name` and `email`
+directly in invitation and connection cards. Use a neutral "Member unavailable"
+fallback when null; never infer an identity or query a broad directory to fill
+it. Treat all backend IDs as integers, separate from Firebase UID strings.
+Use the top-level relationship `id` for actions, not `other_user.id`. Existing
+clients may continue using `other_user_id`; clients must not require a local
+search-result cache to identify relationships after reload. This identity
+extension does not select emergency recipients, enable phone contacts, link
+phone numbers to accounts, or implement notification delivery.
 
 ### Errors and status codes
 

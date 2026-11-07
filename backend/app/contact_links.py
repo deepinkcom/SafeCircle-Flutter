@@ -1,8 +1,9 @@
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -29,15 +30,59 @@ class InvitationResponse(BaseModel):
     action: str = Field(pattern="^(accept|reject)$")
 
 
-def _link_response(
-    link: EmergencyContactLink,
-    current_user_id: int,
-) -> dict:
-    other_user_id = (
+class OtherUserResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+
+
+class ContactLinkResponse(BaseModel):
+    id: int
+    inviter_user_id: int
+    invitee_user_id: int
+    other_user_id: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    responded_at: datetime | None
+    revoked_at: datetime | None
+    other_user: OtherUserResponse | None
+
+    @field_serializer("created_at", "updated_at", "responded_at", "revoked_at")
+    def serialize_timestamp(self, value: datetime | None):
+        # Preserve the pre-schema datetime.isoformat() response encoding.
+        return value.isoformat() if value is not None else None
+
+
+def _other_user_id(link: EmergencyContactLink, current_user_id: int) -> int:
+    if current_user_id not in (link.inviter_user_id, link.invitee_user_id):
+        raise HTTPException(status_code=404, detail="Relationship not found")
+    return (
         link.invitee_user_id
         if link.inviter_user_id == current_user_id
         else link.inviter_user_id
     )
+
+
+def _link_response(
+    link: EmergencyContactLink,
+    current_user_id: int,
+    other_user: Mapping[str, object] | None = None,
+) -> dict:
+    other_user_id = _other_user_id(link, current_user_id)
+    identity = None
+    if (
+        other_user is not None
+        and other_user_id != current_user_id
+        and other_user.get("id") == other_user_id
+        and isinstance(other_user.get("name"), str)
+        and isinstance(other_user.get("email"), str)
+    ):
+        identity = {
+            "id": other_user_id,
+            "name": other_user["name"],
+            "email": other_user["email"],
+        }
 
     return {
         "id": link.id,
@@ -49,10 +94,35 @@ def _link_response(
         "other_user_id": other_user_id,
         "inviter_user_id": link.inviter_user_id,
         "invitee_user_id": link.invitee_user_id,
+        "other_user": identity,
     }
 
 
-@router.post("/invites", status_code=201)
+def _link_responses(
+    links: Sequence[EmergencyContactLink],
+    current_user_id: int,
+    db: Session,
+) -> list[dict]:
+    # Authorize every row before querying identities. Never accept user IDs
+    # supplied by a caller or fetch an unrelated profile as a fallback.
+    other_ids = {_other_user_id(link, current_user_id) for link in links}
+    other_ids.discard(current_user_id)
+    identities = {}
+    if other_ids:
+        identities = {
+            row["id"]: row
+            for row in db.execute(
+                select(User.id, User.name, User.email)
+                .where(User.id.in_(other_ids))
+            ).mappings()
+        }
+    return [
+        _link_response(link, current_user_id, identities.get(_other_user_id(link, current_user_id)))
+        for link in links
+    ]
+
+
+@router.post("/invites", status_code=201, response_model=ContactLinkResponse)
 def send_invitation(
     invitation: InvitationCreate,
     current_user: User = Depends(get_current_user),
@@ -129,10 +199,10 @@ def send_invitation(
             detail="An active invitation already exists",
         )
 
-    return _link_response(link, current_user.id)
+    return _link_responses([link], current_user.id, db)[0]
 
 
-@router.get("/invites/incoming")
+@router.get("/invites/incoming", response_model=list[ContactLinkResponse])
 def get_incoming_invitations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -148,13 +218,10 @@ def get_incoming_invitations(
 
     links = db.scalars(statement).all()
 
-    return [
-        _link_response(link, current_user.id)
-        for link in links
-    ]
+    return _link_responses(links, current_user.id, db)
 
 
-@router.get("/invites/outgoing")
+@router.get("/invites/outgoing", response_model=list[ContactLinkResponse])
 def get_outgoing_invitations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -170,13 +237,10 @@ def get_outgoing_invitations(
 
     links = db.scalars(statement).all()
 
-    return [
-        _link_response(link, current_user.id)
-        for link in links
-    ]
+    return _link_responses(links, current_user.id, db)
 
 
-@router.get("/relationships")
+@router.get("/relationships", response_model=list[ContactLinkResponse])
 def get_relationships(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -197,13 +261,10 @@ def get_relationships(
 
     links = db.scalars(statement).all()
 
-    return [
-        _link_response(link, current_user.id)
-        for link in links
-    ]
+    return _link_responses(links, current_user.id, db)
 
 
-@router.post("/{link_id}/respond")
+@router.post("/{link_id}/respond", response_model=ContactLinkResponse)
 def respond_to_invitation(
     link_id: int,
     response: InvitationResponse,
@@ -242,10 +303,10 @@ def respond_to_invitation(
     db.commit()
     db.refresh(link)
 
-    return _link_response(link, current_user.id)
+    return _link_responses([link], current_user.id, db)[0]
 
 
-@router.delete("/{link_id}")
+@router.delete("/{link_id}", response_model=ContactLinkResponse)
 def revoke_relationship(
     link_id: int,
     current_user: User = Depends(get_current_user),
@@ -284,4 +345,4 @@ def revoke_relationship(
     db.commit()
     db.refresh(link)
 
-    return _link_response(link, current_user.id)
+    return _link_responses([link], current_user.id, db)[0]

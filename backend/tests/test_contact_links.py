@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.dialects import postgresql
@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_db
-from app.contact_links import router
+from app.contact_links import ContactLinkResponse, _link_response, _link_responses, router
 from app.contacts import router as contacts_router
 from app.models import EmergencyContact, EmergencyContactLink, User
 
@@ -131,6 +131,7 @@ def test_outgoing_invitations_include_only_callers_sent_history(client, status):
         response = None
     expected = response.json() if response is not None else sent
     expected["other_user_id"] = 2  # Always relative to the sender of this list.
+    expected["other_user"] = {"id": 2, "name": "User 2", "email": "user2@example.invalid"}
     assert invite(client, 3, 1).status_code == 201  # Incoming to user 1.
     assert invite(client, 2, 3).status_code == 201  # Unrelated to user 1.
 
@@ -180,6 +181,7 @@ def test_create_pending_invitation(client):
     assert set(link) == {
         "id", "inviter_user_id", "invitee_user_id", "status", "created_at",
         "updated_at", "responded_at", "revoked_at", "other_user_id",
+        "other_user",
     }
     assert (link["inviter_user_id"], link["invitee_user_id"]) == (1, 2)
     assert link["status"] == "pending"
@@ -499,3 +501,276 @@ def test_lifecycle_reads_request_postgresql_row_lock(client, operation):
         "FROM emergency_contact_links" in sql and sql.endswith("FOR UPDATE")
         for sql in statements
     )
+
+
+def assert_other_user(link, user_id):
+    assert link["other_user_id"] == user_id
+    assert link["other_user"] == {
+        "id": user_id, "name": f"User {user_id}",
+        "email": f"user{user_id}@example.invalid",
+    }
+
+
+@pytest.mark.parametrize("action", ["accept", "reject"])
+def test_counterparty_identity_across_creation_lists_and_response(client, action):
+    created = invite(client)
+    assert created.status_code == 201
+    link = created.json()
+    assert_other_user(link, 2)
+    incoming = client.get("/contact-links/invites/incoming", headers=headers(2))
+    assert incoming.status_code == 200
+    assert_other_user(incoming.json()[0], 1)
+    outgoing = client.get("/contact-links/invites/outgoing", headers=headers(1))
+    assert outgoing.status_code == 200
+    assert_other_user(outgoing.json()[0], 2)
+    response = respond(client, link["id"], action)
+    assert response.status_code == 200
+    assert_other_user(response.json(), 1)
+    outgoing = client.get("/contact-links/invites/outgoing", headers=headers(1))
+    assert_other_user(outgoing.json()[0], 2)
+    assert outgoing.json()[0]["status"] == ("accepted" if action == "accept" else "rejected")
+    if action == "accept":
+        assert_other_user(relationships(client, 1)[0], 2)
+        assert_other_user(relationships(client, 2)[0], 1)
+    else:
+        assert relationships(client, 1) == relationships(client, 2) == []
+
+
+@pytest.mark.parametrize("actor", [1, 2])
+@pytest.mark.parametrize("accepted", [False, True])
+def test_revocation_returns_only_the_other_participants_identity(client, actor, accepted):
+    link = invite(client).json()
+    if accepted:
+        assert respond(client, link["id"]).status_code == 200
+    response = client.delete(f"/contact-links/{link['id']}", headers=headers(actor))
+    assert response.status_code == 200
+    assert_other_user(response.json(), 2 if actor == 1 else 1)
+    assert response.json()["status"] == "revoked"
+    assert_other_user(
+        client.get("/contact-links/invites/outgoing", headers=headers(1)).json()[0], 2,
+    )
+
+
+def test_relationship_identity_has_only_approved_fields_and_is_current(client, database):
+    link_id = invite(client).json()["id"]
+    with Session(database) as db:
+        user = db.get(User, 2)
+        user.name = "Updated display name"
+        user.email = "updated@example.invalid"
+        db.commit()
+    response = client.get("/contact-links/invites/outgoing", headers=headers(1))
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == link_id
+    assert response.json()[0]["other_user"] == {
+        "id": 2, "name": "Updated display name", "email": "updated@example.invalid",
+    }
+    for private_value in ("firebase_uid", "synthetic-uid", "Test City", "0000000000", "User 3", "user3@example.invalid"):
+        assert private_value not in response.text
+
+
+def test_outsider_cannot_read_counterparty_identity_or_spoof_list_owner(client):
+    link_id = invite(client).json()["id"]
+    for path in ("invites/incoming", "invites/outgoing", "relationships"):
+        response = client.get(
+            f"/contact-links/{path}?user_id=1&inviter_user_id=1&invitee_user_id=2",
+            headers=headers(3),
+        )
+        assert response.status_code == 200
+        assert response.json() == []
+    for action in ("accept", "reject"):
+        response = respond(client, link_id, action, 3)
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Invitation not found"}
+    response = client.delete(f"/contact-links/{link_id}", headers=headers(3))
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Relationship not found"}
+    assert respond(client, link_id).status_code == 200
+    assert relationships(client, 3) == []
+
+
+@pytest.mark.parametrize("path,status,reverse", [
+    ("invites/incoming", "pending", True),
+    ("invites/outgoing", "pending", False),
+    ("relationships", "accepted", False),
+])
+@pytest.mark.parametrize("count", [1, 20])
+def test_relationship_lists_batch_identity_queries(client, database, path, status, reverse, count):
+    with Session(database) as db:
+        db.add_all([
+            User(id=i, firebase_uid=f"synthetic-batch-{i}", name=f"Batch {i}",
+                 email=f"batch{i}@example.invalid", city="Private city", phone="0000000000")
+            for i in range(10, 10 + count)
+        ])
+        db.flush()
+        db.add_all([
+            EmergencyContactLink(
+                inviter_user_id=i if reverse else 1,
+                invitee_user_id=1 if reverse else i,
+                status=status,
+            )
+            for i in range(10, 10 + count)
+        ])
+        db.commit()
+    statements = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(database, "before_cursor_execute", capture)
+    try:
+        response = client.get(f"/contact-links/{path}", headers=headers(1))
+    finally:
+        event.remove(database, "before_cursor_execute", capture)
+    assert response.status_code == 200
+    assert len(response.json()) == count
+    assert {row["other_user"]["id"] for row in response.json()} == set(range(10, 10 + count))
+    # One authentication query, one relationship query, one identity batch.
+    assert len(statements) == 3
+    assert "firebase_uid" not in statements[-1]
+    assert "phone" not in statements[-1] and "city" not in statements[-1]
+
+
+@pytest.mark.parametrize("path", ["invites/incoming", "invites/outgoing", "relationships"])
+def test_empty_relationship_lists_do_not_query_unrelated_identities(client, database, path):
+    statements = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(database, "before_cursor_execute", capture)
+    try:
+        response = client.get(f"/contact-links/{path}", headers=headers(1))
+    finally:
+        event.remove(database, "before_cursor_execute", capture)
+    assert response.status_code == 200 and response.json() == []
+    assert len(statements) == 2
+
+
+@pytest.mark.parametrize("operation", [
+    "incoming", "outgoing", "accepted", "accept", "reject", "revoke",
+])
+def test_missing_counterparty_returns_null_without_substituting_another_user(client, database, operation):
+    reverse = operation in ("incoming", "accept", "reject")
+    link = invite(client, 2, 1).json() if reverse else invite(client).json()
+    if operation == "accepted":
+        assert respond(client, link["id"]).status_code == 200
+    # Simulate referential corruption ONLY in this disposable SQLite fixture.
+    # Normal production foreign keys cascade a user's link deletion.
+    with database.connect() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.execute(User.__table__.delete().where(User.id == 2))
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+    if operation in ("accept", "reject"):
+        response = respond(client, link["id"], operation, 1)
+        result = response.json()
+    elif operation == "revoke":
+        response = client.delete(f"/contact-links/{link['id']}", headers=headers(1))
+        result = response.json()
+    else:
+        path = {"incoming": "invites/incoming", "outgoing": "invites/outgoing", "accepted": "relationships"}[operation]
+        response = client.get(f"/contact-links/{path}", headers=headers(1))
+        assert len(response.json()) == 1
+        result = response.json()[0]
+    assert response.status_code == 200
+    assert result["id"] == link["id"]
+    assert result["other_user_id"] == 2
+    assert result["other_user"] is None
+    assert "User 3" not in response.text and "user3@example.invalid" not in response.text
+
+
+@pytest.mark.parametrize("identity", [
+    None,
+    {"id": 3, "name": "Unrelated", "email": "unrelated@example.invalid"},
+    {"id": 2, "name": None, "email": "user2@example.invalid"},
+    {"id": 2, "name": "User 2", "email": None},
+])
+def test_serializer_does_not_disclose_inconsistent_counterparty_data(identity):
+    link = EmergencyContactLink(id=7, inviter_user_id=1, invitee_user_id=2, status="pending")
+    result = _link_response(link, 1, identity)
+    assert result["other_user_id"] == 2
+    assert result["other_user"] is None
+
+
+def test_serializer_only_projects_approved_identity_fields():
+    link = EmergencyContactLink(id=7, inviter_user_id=1, invitee_user_id=2, status="pending")
+    result = _link_response(link, 1, {
+        "id": 2, "name": "User 2", "email": "user2@example.invalid",
+        "firebase_uid": "synthetic-private-uid", "phone": "0000000000", "city": "Private city",
+    })
+    assert_other_user(result, 2)
+
+
+def test_corrupt_self_link_does_not_return_the_callers_identity_as_counterparty():
+    link = EmergencyContactLink(id=7, inviter_user_id=1, invitee_user_id=1, status="pending")
+    assert _link_response(link, 1, {
+        "id": 1, "name": "User 1", "email": "user1@example.invalid",
+    })["other_user"] is None
+
+
+def test_batch_serializer_authorizes_all_rows_before_reading_any_identities(database):
+    authorized = EmergencyContactLink(id=7, inviter_user_id=1, invitee_user_id=2, status="pending")
+    unrelated = EmergencyContactLink(id=8, inviter_user_id=2, invitee_user_id=3, status="pending")
+    statements = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(database, "before_cursor_execute", capture)
+    try:
+        with Session(database) as db, pytest.raises(HTTPException) as error:
+            _link_responses([authorized, unrelated], 1, db)
+    finally:
+        event.remove(database, "before_cursor_execute", capture)
+    assert error.value.status_code == 404
+    assert error.value.detail == "Relationship not found"
+    assert statements == []
+
+
+def test_response_schema_preserves_existing_timestamp_encoding():
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    link = EmergencyContactLink(
+        id=7, inviter_user_id=1, invitee_user_id=2, status="pending",
+        created_at=now, updated_at=now,
+    )
+    response = ContactLinkResponse(**_link_response(link, 1)).model_dump(mode="json")
+    assert response["created_at"] == response["updated_at"] == "2026-01-01T00:00:00+00:00"
+    assert response["responded_at"] is response["revoked_at"] is None
+
+
+def test_openapi_documents_consistent_nullable_counterparty_schema(client):
+    specification = client.app.openapi()
+    schemas = specification["components"]["schemas"]
+    assert set(schemas["OtherUserResponse"]["properties"]) == {"id", "name", "email"}
+    assert schemas["OtherUserResponse"]["properties"]["id"]["type"] == "integer"
+    assert set(schemas["ContactLinkResponse"]["properties"]) == {
+        "id", "inviter_user_id", "invitee_user_id", "other_user_id", "status",
+        "created_at", "updated_at", "responded_at", "revoked_at", "other_user",
+    }
+    assert schemas["ContactLinkResponse"]["properties"]["other_user"]["anyOf"] == [
+        {"$ref": "#/components/schemas/OtherUserResponse"}, {"type": "null"},
+    ]
+    assert "other_user" in schemas["ContactLinkResponse"]["required"]
+    for field in ("created_at", "updated_at"):
+        assert schemas["ContactLinkResponse"]["properties"][field]["type"] == "string"
+        assert schemas["ContactLinkResponse"]["properties"][field]["format"] == "date-time"
+    for field in ("responded_at", "revoked_at"):
+        assert schemas["ContactLinkResponse"]["properties"][field]["anyOf"] == [
+            {"type": "string", "format": "date-time"}, {"type": "null"},
+        ]
+    for method, path, status_code, is_list in [
+        ("post", "/contact-links/invites", "201", False),
+        ("get", "/contact-links/invites/incoming", "200", True),
+        ("get", "/contact-links/invites/outgoing", "200", True),
+        ("get", "/contact-links/relationships", "200", True),
+        ("post", "/contact-links/{link_id}/respond", "200", False),
+        ("delete", "/contact-links/{link_id}", "200", False),
+    ]:
+        schema = specification["paths"][path][method]["responses"][status_code]["content"]["application/json"]["schema"]
+        if is_list:
+            assert schema["type"] == "array"
+            schema = schema["items"]
+        assert schema["$ref"] == "#/components/schemas/ContactLinkResponse"
