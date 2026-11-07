@@ -1,14 +1,15 @@
 
 from datetime import datetime
+from typing import Annotated
 
 from firebase_admin import auth as firebase_auth
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field, StringConstraints
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .auth import get_db, initialize_firebase, bearer_scheme
+from .auth import get_current_user, get_db, initialize_firebase, bearer_scheme
 from .models import User
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -20,6 +21,52 @@ class ProfileSyncRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     city: str = Field(min_length=1, max_length=100)
     phone: str = Field(min_length=1, max_length=50)
+
+
+SearchEmail = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=3,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    ),
+]
+
+
+class UserSearchResult(BaseModel):
+    name: str
+    email: str
+
+
+@router.get(
+    "/search",
+    response_model=list[UserSearchResult],
+    summary="Look up a registered user by complete email address",
+)
+def search_users(
+    q: Annotated[SearchEmail, Query(description="Complete email address; case-insensitive exact lookup")],
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    response.headers["Cache-Control"] = "no-store"
+    if q.lower() == current_user.email.lower():
+        return []
+
+    matches = db.execute(
+        select(User.name, User.email)
+        .where(func.lower(User.email) == q.lower(), User.id != current_user.id)
+        .order_by(User.id)
+        .limit(2)
+    ).all()
+
+    # The database's email uniqueness is case-sensitive. Fail closed if legacy
+    # case variants would make an otherwise exact lookup ambiguous.
+    if len(matches) != 1:
+        return []
+
+    return [UserSearchResult(name=matches[0].name, email=matches[0].email)]
 
 
 @router.post("/me")

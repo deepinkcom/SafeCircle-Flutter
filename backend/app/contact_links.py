@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -60,15 +60,19 @@ def send_invitation(
 ):
     email = invitation.email.strip().lower()
 
-    target_user = db.scalar(
-        select(User).where(User.email == email)
-    )
+    targets = db.scalars(
+        select(User).where(func.lower(User.email) == email).limit(2)
+    ).all()
 
-    if target_user is None:
+    # Use the same exact, case-insensitive identity match as user discovery.
+    # Legacy case variants must not select an arbitrary recipient.
+    if len(targets) != 1:
         raise HTTPException(
             status_code=404,
             detail="SafeCircle user not found",
         )
+
+    target_user = targets[0]
 
     if target_user.id == current_user.id:
         raise HTTPException(

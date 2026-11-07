@@ -155,7 +155,7 @@ new relationship ID, leaving the original history intact.
 | `401` | Invalid or expired Firebase token | `Invalid or expired Firebase ID token` |
 | `401` | Decoded identity has no UID | `Invalid Firebase identity` |
 | `403` | Verified Firebase account has no SafeCircle profile | `Firebase account is not linked to a SafeCircle user profile` |
-| `404` | No registered recipient with the supplied email | `SafeCircle user not found` |
+| `404` | No registered recipient, or ambiguous case-variant email records | `SafeCircle user not found` |
 | `404` | Invitation missing, or caller is not its invitee | `Invitation not found` |
 | `404` | Relationship missing, or caller is not a participant | `Relationship not found` |
 | `409` | Active invitation/relationship already exists in either direction | `An active relationship or invitation already exists` |
@@ -176,6 +176,87 @@ Only `pending` rows can be accepted/rejected, and only `pending`/`accepted` rows
 can be revoked. No operation promotes rejected/revoked history to accepted.
 Knowing a recipient email or legacy phone number never grants authority to
 respond as that recipient or creates an automatic account link.
+
+## Registered-user discovery for Flutter
+
+`GET /users/search` uses the existing users router and Firebase authentication.
+Both the caller and target must have an existing backend `users` profile; it
+does not enumerate Firebase accounts. The existing profile fields are `name`,
+`email`, `city`, and `phone`, plus internal `id`, `firebase_uid`, and `created_at`.
+There is no username, public handle, or discovery-consent setting in the schema.
+
+For this invitation workflow, discovery is a **complete-email lookup**, not a
+public directory. The caller must already know the recipient's email. Broad
+name, city, phone, prefix, domain-only, wildcard, and blank searches cannot
+list accounts. This reduces enumeration compared with substring search;
+it still confirms registration for a supplied full address. The endpoint does
+not introduce a shared rate limiter or prevent repeated guessed-address checks.
+
+### Request
+
+```http
+GET /users/search?q=invitee%40example.invalid
+```
+
+Use the same Firebase bearer authorization header as the existing API methods.
+`q` is required. Surrounding whitespace is trimmed; the remaining value must
+be 3 to 255 characters, have exactly one `@`, a dot in the domain portion,
+and no whitespace. Matching is case-insensitive against the whole email.
+`%`, `_`, and other SQL metacharacters are literal characters, never wildcards.
+This is email-shaped lookup validation, not deliverability or ownership
+verification; only Firebase authentication and the invitation response establish
+the caller's identity and the recipient's consent.
+
+### Response
+
+HTTP `200` returns a JSON array containing **zero or one** object:
+
+```json
+[
+  {
+    "name": "Example Invitee",
+    "email": "invitee@example.invalid"
+  }
+]
+```
+
+Only `name` and the matched, already-supplied `email` are returned. No internal
+user ID, Firebase UID, city, phone, creation time, device token, or relationship
+details are exposed. The response uses `Cache-Control: no-store`. The query
+selects only those two response fields using bound equality parameters.
+
+`[]` is returned when no account matches, the account is the authenticated
+caller, or multiple other accounts differ only in email casing. The lookup
+reads at most two candidates to detect ambiguity and never returns more than
+one. There is no paging or adjustable result limit; additional `limit`,
+`offset`, or `page` parameters cannot expand the result set. Ambiguous profiles
+are not merged, updated, or automatically linked.
+
+Expected errors are `401` for missing/invalid Firebase authentication, `403`
+for a verified Firebase identity without a linked SafeCircle profile, and `422`
+for a missing or invalid `q`. Errors use the existing `detail` envelope (a
+validation detail array for `422`). Unknown/self/ambiguous matches use `200 []`
+rather than a distinct account-specific error. The endpoint performs no writes.
+
+### Flutter integration
+
+The existing `lib/services/api_service.dart` provides `_authHeaders()` and JSON
+list decoding patterns but has no user-search method yet. No Flutter files are
+changed by this backend task. A future service method can build the URI with
+`Uri.replace(queryParameters: {'q': email.trim()})`, perform an authenticated
+GET, and decode the response as a list. Use query-parameter encoding so `+`,
+`&`, and other address characters are preserved; do not concatenate raw input
+into the URL. Request lookup when a complete address is submitted rather than
+on every partial keystroke. Do not log email queries or authorization headers.
+
+After confirmation by the caller, pass the returned `email` unchanged in
+`POST /contact-links/invites` as `{"email":"invitee@example.invalid"}`. The
+invitation lookup uses the same case-insensitive exact email comparison,
+supports stored mixed-case addresses, and returns `404` on ambiguous case
+variants instead of choosing an arbitrary recipient. All existing duplicate,
+self-invitation, authorization, lifecycle, and database constraints still apply.
+Discovery never creates a relationship or converts a phone-only contact.
+`POST /users/me` is unchanged. No schema change or migration is required.
 
 ## Migration procedure (requires approval before development DB execution)
 
