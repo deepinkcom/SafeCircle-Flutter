@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../widgets/top_brand_bar.dart';
+import '../widgets/backend_profile_banner.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen(
@@ -51,6 +52,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           children: [
+            BackendProfileBanner(
+                onCompleteProfile: _editPersonalDetails,
+                onSignIn: widget.onLogOut),
+            if (context.watch<AppState>().backendProfile?.id != null)
+              Text(
+                  'SafeCircle account #${context.watch<AppState>().backendProfile!.id}'),
             Text('Profile & Settings',
                 style: textTheme.headlineMedium?.copyWith(fontSize: 26)),
             const Text('Manage your account and preferences',
@@ -301,6 +308,7 @@ class _PersonalDetailsDialogState extends State<_PersonalDetailsDialog> {
   }
 
   Future<void> _save() async {
+    if (context.read<AppState>().userProfile.uid != widget.profile.uid) return;
     if (_name.text.trim().isEmpty) {
       setState(() => _error = 'Enter your name.');
       return;
@@ -315,6 +323,7 @@ class _PersonalDetailsDialogState extends State<_PersonalDetailsDialog> {
           city: _city.text,
         );
     if (!mounted) return;
+    if (context.read<AppState>().userProfile.uid != widget.profile.uid) return;
     if (error != null) {
       setState(() {
         _busy = false;
@@ -327,12 +336,26 @@ class _PersonalDetailsDialogState extends State<_PersonalDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    if (context.watch<AppState>().userProfile.uid != widget.profile.uid) {
+      return AlertDialog(
+        title: const Text('Account changed'),
+        content: const Text(
+            'Close this dialog and open Personal Details for the current account.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'))
+        ],
+      );
+    }
     return AlertDialog(
       title: const Text('Personal Details'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const Text(
+                'Name, phone and city are required for SafeCircle Connections. Save to synchronize only your signed-in account.'),
             TextField(
               controller: _name,
               textCapitalization: TextCapitalization.words,

@@ -1,4 +1,5 @@
 import 'package:safecircle/models/contact_link.dart';
+import 'package:safecircle/models/backend_profile_status.dart';
 import 'package:safecircle/models/models.dart';
 import 'package:safecircle/models/registered_user.dart';
 import 'package:safecircle/services/api_service.dart';
@@ -29,6 +30,18 @@ UserProfile testProfile(String uid) => UserProfile(
     );
 
 class ContactLinksFakeApi extends ApiService {
+  Future<BackendProfileStatus> Function()? onProfileStatus;
+  int profileStatusReads = 0;
+
+  @override
+  Future<BackendProfileStatus> fetchMyProfileStatus() async {
+    profileStatusReads++;
+    return onProfileStatus != null
+        ? await onProfileStatus!()
+        : const BackendProfileStatus(
+            id: 1, profileReady: true, missingFields: []);
+  }
+
   List<RegisteredUser> searchData = const [
     RegisteredUser(name: 'Example Member', email: 'member@example.invalid'),
   ];

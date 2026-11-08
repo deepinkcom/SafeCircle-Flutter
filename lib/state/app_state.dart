@@ -6,6 +6,7 @@ import '../services/location_service.dart';
 import 'contact_links_state.dart';
 import 'notifications_state.dart';
 import '../services/api_failure.dart';
+import '../models/backend_profile_status.dart';
 import 'package:intl/intl.dart';
 
 /// Central, observable app state. Screens read from this via
@@ -34,6 +35,65 @@ class AppState extends ChangeNotifier {
   late final NotificationsState notifications;
   bool _disposed = false;
   int _authGeneration = 0;
+  int _profileCheckVersion = 0;
+  BackendProfileStatus? _backendProfile;
+  ApiFailure? _backendProfileError;
+  bool _checkingBackendProfile = false;
+  bool _savingProfile = false;
+  bool get savingProfile => _savingProfile;
+
+  BackendProfileStatus? get backendProfile => _backendProfile;
+  ApiFailure? get backendProfileError => _backendProfileError;
+  bool get checkingBackendProfile => _checkingBackendProfile;
+
+  void _resetBackendProfile() {
+    _profileCheckVersion++;
+    _backendProfile = null;
+    _backendProfileError = null;
+    _checkingBackendProfile = false;
+    _savingProfile = false;
+  }
+
+  Future<bool> checkBackendProfile() async {
+    if (_disposed || !userProfile.isSignedIn) return false;
+    final generation = _authGeneration;
+    final owner = userProfile.uid;
+    final version = ++_profileCheckVersion;
+    bool current() =>
+        _currentAuthentication(generation) &&
+        owner == userProfile.uid &&
+        version == _profileCheckVersion;
+    _checkingBackendProfile = true;
+    _backendProfileError = null;
+    notifyListeners();
+    if (!current()) return false;
+    try {
+      final status = await _api.fetchMyProfileStatus();
+      if (!current()) return false;
+      _backendProfile = status;
+      if (status.profileReady && current()) {
+        if (contactLinks.needsBackendProfile) {
+          await contactLinks.retryAccess();
+        }
+        if (current() && notifications.needsBackendProfile) {
+          await notifications.retryAccess();
+        }
+      }
+      if (!current()) return false;
+      return status.profileReady;
+    } catch (error) {
+      if (!current()) return false;
+      _backendProfileError = error is ApiFailure
+          ? error
+          : const ApiFailure(ApiFailureKind.unexpected);
+      return false;
+    } finally {
+      if (current()) {
+        _checkingBackendProfile = false;
+        notifyListeners();
+      }
+    }
+  }
 
   UserProfile _userProfile = const UserProfile(
     name: '',
@@ -46,7 +106,10 @@ class AppState extends ChangeNotifier {
 
   set userProfile(UserProfile profile) {
     if (_disposed) return;
-    if (profile.uid != _userProfile.uid) _authGeneration++;
+    if (profile.uid != _userProfile.uid) {
+      _authGeneration++;
+      _resetBackendProfile();
+    }
     _userProfile = profile;
     contactLinks.setSession(profile.uid);
     notifications.setSession(_userProfile.uid);
@@ -58,6 +121,7 @@ class AppState extends ChangeNotifier {
 
   int _beginAuthentication() {
     final generation = ++_authGeneration;
+    _resetBackendProfile();
     contactLinks.setSession(null);
     if (_authGeneration == generation) notifications.setSession(null);
     return generation;
@@ -86,8 +150,12 @@ class AppState extends ChangeNotifier {
         return false;
       }
       userProfile = profile;
+      final boundGeneration = _authGeneration;
       notifyListeners();
-      return true;
+      if (!_currentAuthentication(boundGeneration)) return false;
+      await checkBackendProfile();
+      return _currentAuthentication(boundGeneration) &&
+          userProfile.uid == profile.uid;
     } on AuthFailure catch (error) {
       debugPrint('AUTH: restore failed: $error');
       return false;
@@ -119,7 +187,16 @@ class AppState extends ChangeNotifier {
         return 'This sign-in attempt is no longer active.';
       }
       userProfile = profile;
+      final boundGeneration = _authGeneration;
       notifyListeners();
+      if (!_currentAuthentication(boundGeneration)) {
+        return 'This sign-in attempt is no longer active.';
+      }
+      await checkBackendProfile();
+      if (!_currentAuthentication(boundGeneration) ||
+          userProfile.uid != profile.uid) {
+        return 'This sign-in attempt is no longer active.';
+      }
       return null;
     } on AuthFailure catch (error) {
       return error.message;
@@ -143,7 +220,16 @@ class AppState extends ChangeNotifier {
         return 'This sign-in attempt is no longer active.';
       }
       userProfile = profile;
+      final boundGeneration = _authGeneration;
       notifyListeners();
+      if (!_currentAuthentication(boundGeneration)) {
+        return 'This sign-in attempt is no longer active.';
+      }
+      await checkBackendProfile();
+      if (!_currentAuthentication(boundGeneration) ||
+          userProfile.uid != profile.uid) {
+        return 'This sign-in attempt is no longer active.';
+      }
       return null;
     } on AuthFailure catch (error) {
       return error.message;
@@ -158,7 +244,23 @@ class AppState extends ChangeNotifier {
     required String city,
   }) async {
     if (_disposed) return 'This profile update is no longer active.';
+    if (_savingProfile) {
+      return 'Your details are already being saved. Please wait.';
+    }
+    if (!userProfile.isSignedIn) {
+      return 'Please sign in before updating your details.';
+    }
+    if (name.trim().isEmpty || phone.trim().isEmpty || city.trim().isEmpty) {
+      return 'Enter your name, phone and city to complete your SafeCircle profile.';
+    }
+    if (name.trim().length > 255 ||
+        phone.trim().length > 50 ||
+        city.trim().length > 100) {
+      return 'Your name, phone or city is too long. Please shorten it.';
+    }
     final generation = _authGeneration;
+    final owner = userProfile.uid;
+    _savingProfile = true;
     try {
       final updatedProfile = await _auth.updateProfile(
         userProfile.copyWith(
@@ -170,6 +272,9 @@ class AppState extends ChangeNotifier {
 
       if (!_currentAuthentication(generation)) {
         return 'This profile update is no longer active.';
+      }
+      if (updatedProfile.uid != owner) {
+        return 'The account changed. Please sign in again.';
       }
       userProfile = updatedProfile;
       notifyListeners();
@@ -194,13 +299,21 @@ class AppState extends ChangeNotifier {
       if (!_currentAuthentication(generation)) {
         return 'This profile update is no longer active.';
       }
+      final ready = await checkBackendProfile();
+      if (!_currentAuthentication(generation)) {
+        return 'This profile update is no longer active.';
+      }
+      if (!ready) {
+        return 'Your details were saved. Retry the account check to confirm server synchronization.';
+      }
       return null;
     } on AuthFailure catch (error) {
       return error.message;
     } catch (error) {
-      debugPrint('PROFILE SYNC ERROR: $error');
       return 'Your profile was saved, but syncing with the server failed. '
           'Please check your connection and try again.';
+    } finally {
+      if (_currentAuthentication(generation)) _savingProfile = false;
     }
   }
 
@@ -605,6 +718,7 @@ class AppState extends ChangeNotifier {
     if (_disposed) return;
     _disposed = true;
     _authGeneration++;
+    _resetBackendProfile();
     contactLinks.removeListener(_onContactLinksChanged);
     contactLinks.dispose();
     notifications.removeListener(_onContactLinksChanged);

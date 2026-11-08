@@ -145,6 +145,9 @@ def send_invitation(
 
     target_user = targets[0]
 
+    if any(not getattr(target_user, field).strip() for field in ("name", "phone", "city")):
+        raise HTTPException(status_code=404, detail="SafeCircle user not found")
+
     if target_user.id == current_user.id:
         raise HTTPException(
             status_code=400,

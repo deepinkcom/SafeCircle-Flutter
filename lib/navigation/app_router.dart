@@ -25,6 +25,7 @@ import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
 import '../widgets/top_brand_bar.dart';
 import '../widgets/real_map.dart';
+import '../widgets/backend_profile_banner.dart';
 
 /// Top-level app flow. Auth screens (welcome/login/create account) push on
 /// top of a root [Navigator]; once "logged in", [_MainShell] takes over and
@@ -330,10 +331,30 @@ class _MainShell extends StatefulWidget {
 
 class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
   int _tabIndex = 0;
+  late final AppState _app;
+  bool _wasBackendReady = false;
+
+  void _backendReadinessChanged() {
+    final ready = _app.backendProfile?.profileReady == true;
+    if (ready && !_wasBackendReady && FirebaseBootstrap.isReady) {
+      final owner = _app.userProfile.uid;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            _app.userProfile.uid == owner &&
+            _app.backendProfile?.profileReady == true) {
+          widget.notificationService.registerDevice().catchError((Object _) {});
+        }
+      });
+    }
+    _wasBackendReady = ready;
+  }
 
   @override
   void initState() {
     super.initState();
+    _app = context.read<AppState>();
+    _wasBackendReady = _app.backendProfile?.profileReady == true;
+    _app.addListener(_backendReadinessChanged);
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -406,6 +427,7 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _app.removeListener(_backendReadinessChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -619,6 +641,11 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final showSetup = app.userProfile.isSignedIn &&
+        (app.checkingBackendProfile ||
+            app.backendProfileError != null ||
+            app.backendProfile?.profileReady != true);
     final tabs = <Widget>[
       HomeScreen(
         onActivatePanic: _openActivatePanic,
@@ -646,7 +673,15 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
     ];
 
     return Scaffold(
-      body: IndexedStack(index: _tabIndex, children: tabs),
+      body: Column(children: [
+        if (_tabIndex != 4 && showSetup)
+          SafeArea(
+              bottom: false,
+              child: BackendProfileBanner(
+                  onCompleteProfile: _openConnectionProfile,
+                  onSignIn: widget.onSignInAgain)),
+        Expanded(child: IndexedStack(index: _tabIndex, children: tabs)),
+      ]),
       bottomNavigationBar: SafeCircleBottomNav(
         currentIndex: _tabIndex,
         onTap: (i) => setState(() => _tabIndex = i),

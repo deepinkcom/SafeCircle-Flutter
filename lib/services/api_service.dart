@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/contact_link.dart';
 import '../models/app_notification.dart';
+import '../models/backend_profile_status.dart';
 import '../models/registered_user.dart';
 import 'api_failure.dart';
 
@@ -273,6 +274,10 @@ class ApiService {
     return _request('DELETE', '/contact-links/$linkId',
         parse: (value) => _link(value, expectedId: linkId));
   }
+
+  Future<BackendProfileStatus> fetchMyProfileStatus() =>
+      _request('GET', '/users/me',
+          parse: (value) => BackendProfileStatus.fromJson(_object(value)));
 
   Future<Map<String, dynamic>> syncMyProfile({
     required String name,
