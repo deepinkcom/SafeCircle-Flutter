@@ -12,11 +12,15 @@ class ContactLinksScreen extends StatefulWidget {
     required this.onInvite,
     required this.onSignIn,
     required this.onCompleteProfile,
+    this.initialView = 0,
+    this.notice,
   });
 
   final Future<void> Function() onInvite;
   final Future<void> Function() onSignIn;
   final Future<void> Function() onCompleteProfile;
+  final int initialView;
+  final String? notice;
 
   @override
   State<ContactLinksScreen> createState() => _ContactLinksScreenState();
@@ -33,7 +37,8 @@ class _ContactLinksScreenState extends State<ContactLinksScreen>
   void initState() {
     super.initState();
     _state = context.read<ContactLinksState>();
-    _tabs = TabController(length: 3, vsync: this);
+    _view = widget.initialView.clamp(0, 2);
+    _tabs = TabController(length: 3, vsync: this, initialIndex: _view);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _refresh();
     });
@@ -162,6 +167,8 @@ class _ContactLinksScreenState extends State<ContactLinksScreen>
                             physics: const AlwaysScrollableScrollPhysics(),
                             padding: const EdgeInsets.all(16),
                             children: [
+                              if (widget.notice != null)
+                                ContactLinksNotice(message: widget.notice!),
                               FilledButton.icon(
                                   onPressed:
                                       state.isAccessBlocked ? null : _invite,

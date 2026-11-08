@@ -8,7 +8,8 @@ import '../widgets/top_brand_bar.dart';
 enum _HistoryFilter { all, sent, received }
 
 class AlertHistoryScreen extends StatefulWidget {
-  const AlertHistoryScreen({super.key});
+  const AlertHistoryScreen({super.key, this.notificationSession});
+  final int? notificationSession;
 
   @override
   State<AlertHistoryScreen> createState() => _AlertHistoryScreenState();
@@ -20,12 +21,21 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    if (widget.notificationSession != null &&
+        widget.notificationSession != state.notifications.sessionVersion) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Alert History')),
+          body: const Center(
+              child: Text(
+                  'This notification is unavailable in the current session.')));
+    }
     final filtered = state.alertHistory.where((e) {
       switch (_filter) {
         case _HistoryFilter.all:
           return true;
         case _HistoryFilter.sent:
-          return e.kind == AlertKind.emergencySent || e.kind == AlertKind.testSent;
+          return e.kind == AlertKind.emergencySent ||
+              e.kind == AlertKind.testSent;
         case _HistoryFilter.received:
           return e.kind == AlertKind.nearbyReceived;
       }
@@ -43,7 +53,10 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Alert History',
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontSize: 26)),
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineMedium
+                          ?.copyWith(fontSize: 26)),
                   const Text('Your alerts and activity history',
                       style: TextStyle(color: AppColors.textMuted)),
                 ],
@@ -71,7 +84,8 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
                     label: 'Received',
                     icon: Icons.groups,
                     selected: _filter == _HistoryFilter.received,
-                    onTap: () => setState(() => _filter = _HistoryFilter.received),
+                    onTap: () =>
+                        setState(() => _filter = _HistoryFilter.received),
                   ),
                 ],
               ),
@@ -84,7 +98,9 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (context, index) => _AlertCard(
                   event: filtered[index],
-                  onResolve: () => context.read<AppState>().resolveAlertById(filtered[index].id),
+                  onResolve: () => context
+                      .read<AppState>()
+                      .resolveAlertById(filtered[index].id),
                 ),
               ),
             ),
@@ -96,7 +112,11 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
 }
 
 class _FilterPill extends StatelessWidget {
-  const _FilterPill({required this.label, required this.selected, required this.onTap, this.icon});
+  const _FilterPill(
+      {required this.label,
+      required this.selected,
+      required this.onTap,
+      this.icon});
 
   final String label;
   final bool selected;
@@ -121,7 +141,9 @@ class _FilterPill extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 14, color: selected ? Colors.white : AppColors.textMuted),
+                Icon(icon,
+                    size: 14,
+                    color: selected ? Colors.white : AppColors.textMuted),
                 const SizedBox(width: 5),
               ],
               Text(
@@ -141,10 +163,10 @@ class _FilterPill extends StatelessWidget {
 }
 
 class _AlertCard extends StatelessWidget {
-    const _AlertCard({required this.event, required this.onResolve});
+  const _AlertCard({required this.event, required this.onResolve});
 
-    final AlertEvent event;
-    final Future<void> Function() onResolve;
+  final AlertEvent event;
+  final Future<void> Function() onResolve;
 
   @override
   Widget build(BuildContext context) {
@@ -172,7 +194,7 @@ class _AlertCard extends StatelessWidget {
     late String statusLabel;
     late Color statusColor;
     late Color statusBg;
-   switch (event.status) {
+    switch (event.status) {
       case AlertStatus.active:
         statusLabel = 'Active';
         statusColor = AppColors.redAlert;
@@ -216,14 +238,18 @@ class _AlertCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(event.title, style: Theme.of(context).textTheme.titleMedium),
-                  Text(event.timeLabel, style: Theme.of(context).textTheme.bodyMedium),
+                  Text(event.title,
+                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(event.timeLabel,
+                      style: Theme.of(context).textTheme.bodyMedium),
                   Row(
                     children: [
-                      const Icon(Icons.location_on, color: AppColors.textMuted, size: 12),
+                      const Icon(Icons.location_on,
+                          color: AppColors.textMuted, size: 12),
                       const SizedBox(width: 3),
                       Text(event.locationLabel,
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                          style: const TextStyle(
+                              color: AppColors.textMuted, fontSize: 12)),
                     ],
                   ),
                 ],
@@ -233,22 +259,30 @@ class _AlertCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(12)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                      color: statusBg, borderRadius: BorderRadius.circular(12)),
                   child: Text(statusLabel,
                       style: TextStyle(
-                          color: statusColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                          color: statusColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
                 ),
                 if (event.status == AlertStatus.resolved ||
                     event.status == AlertStatus.acknowledged) ...[
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Icon(Icons.check_circle, color: AppColors.tealPrimary, size: 12),
+                      const Icon(Icons.check_circle,
+                          color: AppColors.tealPrimary, size: 12),
                       const SizedBox(width: 3),
                       Text(
-                        event.status == AlertStatus.resolved ? 'Resolved' : 'Acknowledged',
-                        style: const TextStyle(color: AppColors.tealPrimary, fontSize: 11),
+                        event.status == AlertStatus.resolved
+                            ? 'Resolved'
+                            : 'Acknowledged',
+                        style: const TextStyle(
+                            color: AppColors.tealPrimary, fontSize: 11),
                       ),
                     ],
                   ),

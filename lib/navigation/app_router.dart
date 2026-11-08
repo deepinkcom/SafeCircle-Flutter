@@ -6,6 +6,10 @@ import '../screens/alert_history_screen.dart';
 import '../screens/contacts_screen.dart';
 import '../screens/contact_links_screen.dart';
 import '../screens/invite_contact_screen.dart';
+import '../screens/notifications_screen.dart';
+import '../models/app_notification.dart';
+import '../services/api_failure.dart';
+import '../services/location_service.dart';
 import '../screens/create_account_screen.dart';
 import '../screens/emergency_active_screen.dart';
 import '../screens/emergency_nearby_screen.dart';
@@ -50,10 +54,25 @@ enum _AuthScreen { welcome, login, createAccount, loggedIn }
 
 class _AuthFlowState extends State<_AuthFlow> {
   bool _notificationRegistrationAttempted = false;
+  String? _registeredNotificationUser;
+  int? _pendingNotification;
+
   Future<void>? _initialData;
   final NotificationService _notificationService = NotificationService();
 
   Future<void> _registerNotificationsSafely() async {
+    final uid = context.read<AppState>().userProfile.uid;
+    if (_registeredNotificationUser != uid) {
+      _notificationRegistrationAttempted = false;
+      _registeredNotificationUser = uid;
+    }
+    _notificationService.bindUser(uid);
+    _notificationService.onInboxChanged = () {
+      if (mounted) context.read<AppState>().notifications.refresh();
+    };
+    _notificationService.onNotificationTap = (id) {
+      if (mounted) setState(() => _pendingNotification = id);
+    };
     if (!FirebaseBootstrap.isReady) {
       debugPrint('Firebase not ready; notification setup skipped.');
       return;
@@ -97,6 +116,11 @@ class _AuthFlowState extends State<_AuthFlow> {
   }
 
   Future<void> _leaveMain({bool signInAgain = false}) async {
+    _notificationService.bindUser(null);
+    await _notificationService.detachDevice();
+    if (!mounted) return;
+    _pendingNotification = null;
+    _notificationRegistrationAttempted = false;
     await context.read<AppState>().logOut();
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -198,6 +222,11 @@ class _AuthFlowState extends State<_AuthFlow> {
           future: _initialData,
           builder: (context, snapshot) {
             return _MainShell(
+              notificationService: _notificationService,
+              pendingNotification: _pendingNotification,
+              onNotificationHandled: () {
+                if (mounted) setState(() => _pendingNotification = null);
+              },
               onLogOut: () => _leaveMain(),
               onSignInAgain: () => _leaveMain(signInAgain: true),
             );
@@ -282,7 +311,15 @@ class _MapTab extends StatelessWidget {
 }
 
 class _MainShell extends StatefulWidget {
-  const _MainShell({required this.onLogOut, required this.onSignInAgain});
+  const _MainShell(
+      {required this.onLogOut,
+      required this.onSignInAgain,
+      required this.notificationService,
+      this.pendingNotification,
+      required this.onNotificationHandled});
+  final NotificationService notificationService;
+  final int? pendingNotification;
+  final VoidCallback onNotificationHandled;
 
   final VoidCallback onLogOut;
   final Future<void> Function() onSignInAgain;
@@ -291,8 +328,201 @@ class _MainShell extends StatefulWidget {
   State<_MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<_MainShell> {
+class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
   int _tabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<AppState>().notifications.refreshCount();
+        _consumePush();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _MainShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.pendingNotification != null &&
+        widget.pendingNotification != oldWidget.pendingNotification) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumePush();
+      });
+    }
+  }
+
+  void _consumePush() {
+    final id = widget.pendingNotification;
+    if (id == null) return;
+    widget.onNotificationHandled();
+    _openNotifications(notificationId: id);
+  }
+
+  Future<void> _notificationSettings() async {
+    try {
+      final allowed = await widget.notificationService.permissionGranted();
+      if (!mounted) return;
+      final enable = await showDialog<bool>(
+          context: context,
+          builder: (dialog) => AlertDialog(
+                  title: const Text('Device notification permission'),
+                  content: Text(allowed
+                      ? 'Android allows notifications. Change this permission in Android app settings. This is not an account-wide notification preference.'
+                      : 'Android notification permission is not granted. You can request permission or change it in app settings.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(dialog, false),
+                        child: const Text('Open app settings')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(dialog, true),
+                        child: const Text('Request permission'))
+                  ]));
+      if (enable == true) {
+        await widget.notificationService.requestPermission();
+        if (await widget.notificationService.permissionGranted()) {
+          await widget.notificationService.registerDevice();
+        }
+      } else if (enable == false) {
+        await LocationService().openAppSettings();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Could not update notification permission. Please try again.')));
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<AppState>().notifications.refreshCount();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _openNotifications({int? notificationId}) async {
+    final state = context.read<AppState>().notifications;
+    final session = state.sessionVersion;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (originContext) => ChangeNotifierProvider.value(
+            value: state,
+            child: NotificationsScreen(
+                initialNotificationId: notificationId,
+                onOpen: (item) => _openNotificationSource(item,
+                    originIsCurrent: () =>
+                        originContext.mounted &&
+                        (ModalRoute.of(originContext)?.isCurrent ?? false)),
+                onSignIn: widget.onSignInAgain,
+                onCompleteProfile: _openConnectionProfile))));
+    if (mounted && state.sessionVersion == session) await state.refreshCount();
+  }
+
+  Future<String?> _openNotificationSource(AppNotification item,
+      {required bool Function() originIsCurrent}) async {
+    final navigator = Navigator.of(context);
+    final app = context.read<AppState>();
+    final state = app.notifications;
+    final session = state.sessionVersion;
+    var resolving = true;
+    bool current() =>
+        mounted &&
+        state.sessionVersion == session &&
+        !state.isAccessBlocked &&
+        (!resolving || originIsCurrent());
+    try {
+      if (item.category == NotificationCategory.connection) {
+        final links = app.contactLinks;
+        final refreshed = await links.refresh();
+        if (!current()) return null;
+        if (!refreshed.succeeded) {
+          if (refreshed.error != null) {
+            state.reportAccessFailure(refreshed.error!);
+          }
+          return refreshed.error?.message ??
+              'Could not check this invitation. Refresh and try again.';
+        }
+        final received = links.incoming.items.any((n) => n.id == item.sourceId);
+        final accepted = links.accepted.items.any((n) => n.id == item.sourceId);
+        final sent = links.outgoing.items.any((n) => n.id == item.sourceId);
+        resolving = false;
+        await navigator.push<void>(MaterialPageRoute(
+            builder: (_) => ChangeNotifierProvider.value(
+                value: links,
+                child: ContactLinksScreen(
+                    initialView: received
+                        ? 1
+                        : accepted
+                            ? 0
+                            : sent
+                                ? 2
+                                : 0,
+                    notice: received || accepted || sent
+                        ? null
+                        : 'This invitation is no longer available. Current connections are shown.',
+                    onInvite: _openInvite,
+                    onSignIn: widget.onSignInAgain,
+                    onCompleteProfile: _openConnectionProfile))));
+      } else if (item.category == NotificationCategory.emergency) {
+        final history = await app.loadNotificationAlertHistory(item.sourceId);
+        if (!current()) return null;
+        if (history) {
+          resolving = false;
+          await navigator.push<void>(MaterialPageRoute(
+              builder: (_) =>
+                  AlertHistoryScreen(notificationSession: session)));
+        } else {
+          final alert = await app.findNotificationNearbyAlert(item.sourceId);
+          if (!current()) return null;
+          if (alert == null) {
+            return 'This emergency alert is unavailable, resolved, or outside your accessible nearby alerts.';
+          }
+          resolving = false;
+          await navigator.push<void>(MaterialPageRoute(
+              builder: (destinationContext) => EmergencyNearbyScreen(
+                  notificationAlert: alert,
+                  notificationSession: session,
+                  onBack: () => navigator.pop(),
+                  onImOnMyWay: () async {
+                    if (!current() ||
+                        !destinationContext.mounted ||
+                        !(ModalRoute.of(destinationContext)?.isCurrent ??
+                            false)) {
+                      return;
+                    }
+                    await app.acknowledgeNearbyAlert(
+                        notificationAlert: alert, notificationSession: session);
+                    if (current() &&
+                        destinationContext.mounted &&
+                        (ModalRoute.of(destinationContext)?.isCurrent ??
+                            false)) {
+                      navigator.pop();
+                    }
+                  })));
+        }
+      } else {
+        return 'This notification type is not supported yet.';
+      }
+      return null;
+    } on ApiFailure catch (failure) {
+      if (!current()) return null;
+      state.reportAccessFailure(failure);
+      return failure.message;
+    } catch (_) {
+      return current()
+          ? 'Could not check this notification source. Check your connection and location permission, then try again.'
+          : null;
+    }
+  }
 
   void _openActivatePanic() {
     Navigator.of(context).push(
@@ -340,10 +570,12 @@ class _MainShellState extends State<_MainShell> {
   }
 
   void _openContacts() {
+    context.read<AppState>().notifications.refreshCount();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ContactsScreen(
             onBack: () => Navigator.of(context).pop(),
+            onOpenNotifications: _openNotifications,
             onOpenConnections: _openConnections),
       ),
     );
@@ -354,7 +586,10 @@ class _MainShellState extends State<_MainShell> {
       builder: (_) => Scaffold(
         appBar: AppBar(title: const Text('Account recovery')),
         body: ProfileScreen(
-            onOpenContacts: _openContacts, onLogOut: widget.onLogOut),
+            onOpenContacts: _openContacts,
+            onLogOut: widget.onLogOut,
+            onOpenNotifications: _openNotifications,
+            onNotificationSettings: _notificationSettings),
       ),
     ));
   }
@@ -389,6 +624,7 @@ class _MainShellState extends State<_MainShell> {
         onActivatePanic: _openActivatePanic,
         onOpenContacts: _openContacts,
         onOpenAlerts: _openEmergencyNearby,
+        onOpenNotifications: _openNotifications,
       ),
       EmergencyNearbyScreen(
         onBack: () => setState(() => _tabIndex = 0),
@@ -402,7 +638,11 @@ class _MainShellState extends State<_MainShell> {
         onActivatePanic: _openActivatePanic,
       ),
       const AlertHistoryScreen(),
-      ProfileScreen(onOpenContacts: _openContacts, onLogOut: widget.onLogOut),
+      ProfileScreen(
+          onOpenContacts: _openContacts,
+          onLogOut: widget.onLogOut,
+          onOpenNotifications: _openNotifications,
+          onNotificationSettings: _notificationSettings),
     ];
 
     return Scaffold(

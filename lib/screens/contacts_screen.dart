@@ -3,13 +3,18 @@ import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
+import '../widgets/notification_bell.dart';
 
 class ContactsScreen extends StatelessWidget {
   const ContactsScreen(
-      {super.key, required this.onBack, this.onOpenConnections});
+      {super.key,
+      required this.onBack,
+      this.onOpenConnections,
+      this.onOpenNotifications});
 
   final VoidCallback onBack;
   final VoidCallback? onOpenConnections;
+  final VoidCallback? onOpenNotifications;
 
   void _showEditContactDialog(
     BuildContext context,
@@ -104,7 +109,12 @@ class ContactsScreen extends StatelessWidget {
                         const Icon(Icons.arrow_back, color: AppColors.navyDark),
                   ),
                   const Spacer(),
-                  const Icon(Icons.notifications, color: AppColors.navyDark),
+                  NotificationBell(
+                      onTap: onOpenNotifications,
+                      unreadCount: state.notifications.unreadCount,
+                      countUnavailable:
+                          state.notifications.countError != null ||
+                              state.notifications.isAccessBlocked),
                   const SizedBox(width: 12),
                 ],
               ),

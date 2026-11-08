@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.database import settings
-from app.models import EmergencyContact, EmergencyContactLink, User
+from app.models import EmergencyContact, Device, EmergencyContactLink, User
 
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -35,6 +35,7 @@ def migration_db(tmp_path, monkeypatch):
 
     User.__table__.create(engine)
     EmergencyContact.__table__.create(engine)
+    Device.__table__.create(engine)
     with engine.begin() as connection:
         connection.execute(User.__table__.insert(), [
             dict(id=i, firebase_uid=f"synthetic-{i}", name=f"User {i}",
@@ -141,7 +142,8 @@ def test_postgresql_revision_sql_uses_partial_unordered_unique_index():
     script = ScriptDirectory.from_config(config)
     revision = script.get_revision(NEW_REVISION)
     assert revision.down_revision == OLD_REVISION
-    assert script.get_current_head() == NEW_REVISION
+    # The relationship revision remains unchanged beneath the notification head.
+    assert NEW_REVISION in {r.revision for r in script.walk_revisions()}
     output = StringIO()
     context = MigrationContext.configure(
         dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output},

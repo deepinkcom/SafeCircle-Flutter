@@ -73,3 +73,17 @@ def register_device(
         "platform": device.platform,
         "registered_at": device.registered_at.isoformat(),
     }
+
+
+class DeviceRemove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fcm_token: str = Field(min_length=1, max_length=500)
+
+
+@router.delete("")
+def unregister_device(body: DeviceRemove, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    device = db.scalar(select(Device).where(Device.fcm_token == body.fcm_token, Device.user_id == current_user.id))
+    if device is not None:
+        db.delete(device)
+        db.commit()
+    return {"success": True}

@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/contact_link.dart';
+import '../models/app_notification.dart';
 import '../models/registered_user.dart';
 import 'api_failure.dart';
 
@@ -161,6 +162,92 @@ class ApiService {
   Future<ContactLink> sendContactInvitation({required String email}) =>
       _request('POST', '/contact-links/invites',
           body: {'email': _email(email)}, parse: _link);
+
+  Future<NotificationPage> fetchNotifications(
+      {NotificationCategory? category, int limit = 20, int offset = 0}) {
+    if (category == NotificationCategory.unknown ||
+        limit < 1 ||
+        limit > 100 ||
+        offset < 0 ||
+        offset > 1000000) {
+      throw const ApiFailure(ApiFailureKind.validation);
+    }
+    return _request('GET', '/notifications', query: {
+      if (category != null) 'category': category.name,
+      'limit': '$limit',
+      'offset': '$offset',
+    }, parse: (value) {
+      final page = NotificationPage.fromJson(_object(value));
+      if (page.offset != offset ||
+          page.limit != limit ||
+          (category != null && page.items.any((n) => n.category != category))) {
+        throw const FormatException('Unexpected notification page.');
+      }
+      return page;
+    });
+  }
+
+  Future<int> fetchNotificationUnreadCount() =>
+      _request('GET', '/notifications/unread-count', parse: (value) {
+        final count = _object(value)['unread_count'];
+        if (count is! int || count < 0) {
+          throw const FormatException('Invalid unread count.');
+        }
+        return count;
+      });
+
+  Future<AppNotification> fetchNotification(int id) {
+    _linkId(id);
+    return _request('GET', '/notifications/$id', parse: (value) {
+      final row = AppNotification.fromJson(_object(value));
+      if (row.id != id) throw const FormatException('Unexpected notification.');
+      return row;
+    });
+  }
+
+  Future<void> manageNotifications(String operation,
+      {NotificationCategory? category, int? id}) {
+    if (!{'read-all', 'clear-read', 'clear-all', 'delete'}
+            .contains(operation) ||
+        category == NotificationCategory.unknown) {
+      throw const ApiFailure(ApiFailureKind.validation);
+    }
+    if (operation == 'delete') _linkId(id ?? 0);
+    return _request(
+        operation == 'read-all' ? 'POST' : 'DELETE',
+        operation == 'delete'
+            ? '/notifications/$id'
+            : operation == 'read-all'
+                ? '/notifications/mark-all-read'
+                : '/notifications',
+        query: {
+          if (category != null) 'category': category.name,
+          if (operation.startsWith('clear-'))
+            'scope': operation == 'clear-read' ? 'read' : 'all'
+        }, parse: (value) {
+      final n = _object(value)['affected'];
+      if (n is! int || n < 0) {
+        throw const FormatException('Invalid management response.');
+      }
+    });
+  }
+
+  Future<void> unregisterDevice({required String fcmToken}) =>
+      _request('DELETE', '/devices',
+          body: {'fcm_token': fcmToken}, decodeBody: false, parse: (_) {});
+
+  Future<AppNotification> updateNotificationRead(
+      {required int notificationId, required bool read}) {
+    _linkId(notificationId);
+    return _request('PATCH', '/notifications/$notificationId',
+        body: {'read': read}, parse: (value) {
+      final notification = AppNotification.fromJson(_object(value));
+      if (notification.id != notificationId || notification.isUnread == read) {
+        throw const FormatException('Unexpected notification update.');
+      }
+      return notification;
+    });
+  }
 
   Future<List<ContactLink>> fetchIncomingInvitations() =>
       _request('GET', '/contact-links/invites/incoming', parse: _links);

@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
 import 'safe_circle_mark.dart';
+import 'notification_bell.dart';
 
 class TopBrandBar extends StatelessWidget implements PreferredSizeWidget {
-  const TopBrandBar({super.key, this.showNotification = true, this.onBellTap});
+  const TopBrandBar(
+      {super.key,
+      this.showNotification = true,
+      this.onBellTap,
+      this.unreadCount,
+      this.countUnavailable = false});
 
   final bool showNotification;
   final VoidCallback? onBellTap;
+  final int? unreadCount;
+  final bool countUnavailable;
 
   @override
   Size get preferredSize => const Size.fromHeight(64);
@@ -24,27 +31,10 @@ class TopBrandBar extends StatelessWidget implements PreferredSizeWidget {
             Text('SafeCircle', style: Theme.of(context).textTheme.titleLarge),
             const Spacer(),
             if (showNotification)
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    onPressed: onBellTap,
-                    icon: const Icon(Icons.notifications, color: AppColors.navyDark),
-                  ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppColors.redAlert,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              NotificationBell(
+                  onTap: onBellTap,
+                  unreadCount: unreadCount,
+                  countUnavailable: countUnavailable),
           ],
         ),
       ),

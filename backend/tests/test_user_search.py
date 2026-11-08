@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_db
 from app.contact_links import router as contact_links_router
-from app.models import EmergencyContact, EmergencyContactLink, User
+from app.models import EmergencyContact, Device, EmergencyContactLink, Notification, PushDelivery, User
 from app.users import router
 
 
@@ -27,7 +27,7 @@ def database(tmp_path):
     def enable_foreign_keys(connection, _):
         connection.execute("PRAGMA foreign_keys=ON")
 
-    for model in (User, EmergencyContact, EmergencyContactLink):
+    for model in (User, EmergencyContact, EmergencyContactLink, Device, Notification, PushDelivery):
         model.__table__.create(engine)
     with Session(engine) as db:
         db.add_all([

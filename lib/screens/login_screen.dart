@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
-import '../widgets/safe_circle_mark.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.onLogIn, required this.onCreateAccount});
+  const LoginScreen(
+      {super.key, required this.onLogIn, required this.onCreateAccount});
 
   final Future<String?> Function(String email, String password) onLogIn;
   final VoidCallback onCreateAccount;
@@ -55,9 +55,14 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             children: [
               const SizedBox(height: 32),
-              const SafeCircleMark(size: 88),
+              Image.asset('assets/branding/neon_guardian_shield_original.png',
+                  width: 88,
+                  height: 88,
+                  fit: BoxFit.contain,
+                  semanticLabel: 'SafeCircle logo'),
               const SizedBox(height: 12),
-              Text('SafeCircle', style: textTheme.headlineLarge?.copyWith(fontSize: 30)),
+              Text('SafeCircle',
+                  style: textTheme.headlineLarge?.copyWith(fontSize: 30)),
               Text('Stay safe together', style: textTheme.bodyMedium),
               const SizedBox(height: 28),
               TextField(
@@ -76,13 +81,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: InputDecoration(
                   labelText: 'Password',
                   hintText: 'Enter your password',
-                  prefixIcon: const Icon(Icons.lock, color: AppColors.tealPrimary),
+                  prefixIcon:
+                      const Icon(Icons.lock, color: AppColors.tealPrimary),
                   suffixIcon: IconButton(
                     icon: Icon(
                       _showPassword ? Icons.visibility_off : Icons.visibility,
                       color: AppColors.textMuted,
                     ),
-                    onPressed: () => setState(() => _showPassword = !_showPassword),
+                    onPressed: () =>
+                        setState(() => _showPassword = !_showPassword),
                   ),
                 ),
               ),
@@ -101,7 +108,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 12),
                 Text(
                   _error!,
-                  style: const TextStyle(color: AppColors.redAlert, fontSize: 13),
+                  style:
+                      const TextStyle(color: AppColors.redAlert, fontSize: 13),
                 ),
               ],
               const SizedBox(height: 18),
@@ -112,19 +120,23 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: _busy ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.navyDark,
-                    disabledBackgroundColor: AppColors.navyDark.withValues(alpha: 0.4),
+                    disabledBackgroundColor:
+                        AppColors.navyDark.withValues(alpha: 0.4),
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(28)),
                   ),
                   icon: _busy
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
                         )
                       : const Icon(Icons.lock, size: 18),
                   label: const Text('Log In',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                 ),
               ),
               const SizedBox(height: 18),
@@ -133,7 +145,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   Expanded(child: Divider(color: AppColors.divider)),
                   Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Text('OR', style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                    child: Text('OR',
+                        style: TextStyle(
+                            color: AppColors.textMuted, fontSize: 13)),
                   ),
                   Expanded(child: Divider(color: AppColors.divider)),
                 ],
@@ -146,13 +160,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: widget.onCreateAccount,
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: AppColors.tealPrimary),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(28)),
                   ),
-                  icon: const Icon(Icons.person_add_alt, color: AppColors.tealPrimary, size: 18),
+                  icon: const Icon(Icons.person_add_alt,
+                      color: AppColors.tealPrimary, size: 18),
                   label: const Text(
                     'Create Account',
                     style: TextStyle(
-                        color: AppColors.tealPrimary, fontSize: 16, fontWeight: FontWeight.w600),
+                        color: AppColors.tealPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -160,18 +178,22 @@ class _LoginScreenState extends State<LoginScreen> {
               Card(
                 color: AppColors.tealBg,
                 elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
                 child: Padding(
                   padding: const EdgeInsets.all(14),
                   child: Row(
                     children: [
-                      const Icon(Icons.location_on, color: AppColors.tealPrimary),
+                      const Icon(Icons.location_on,
+                          color: AppColors.tealPrimary),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: Text('Your location is only shared during emergencies.',
+                        child: Text(
+                            'Your location is only shared during emergencies.',
                             style: textTheme.bodyMedium),
                       ),
-                      const Icon(Icons.verified_user, color: AppColors.tealPrimary),
+                      const Icon(Icons.verified_user,
+                          color: AppColors.tealPrimary),
                     ],
                   ),
                 ),

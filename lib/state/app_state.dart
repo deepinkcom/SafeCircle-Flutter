@@ -4,6 +4,8 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import 'contact_links_state.dart';
+import 'notifications_state.dart';
+import '../services/api_failure.dart';
 import 'package:intl/intl.dart';
 
 /// Central, observable app state. Screens read from this via
@@ -21,12 +23,15 @@ class AppState extends ChangeNotifier {
         _auth = authService ?? AuthService() {
     contactLinks = ContactLinksState(apiService: _api);
     contactLinks.addListener(_onContactLinksChanged);
+    notifications = NotificationsState(apiService: _api);
+    notifications.addListener(_onContactLinksChanged);
   }
 
   final ApiService _api;
   final LocationService _location;
   final AuthService _auth;
   late final ContactLinksState contactLinks;
+  late final NotificationsState notifications;
   bool _disposed = false;
   int _authGeneration = 0;
 
@@ -44,6 +49,7 @@ class AppState extends ChangeNotifier {
     if (profile.uid != _userProfile.uid) _authGeneration++;
     _userProfile = profile;
     contactLinks.setSession(profile.uid);
+    notifications.setSession(_userProfile.uid);
   }
 
   void _onContactLinksChanged() {
@@ -53,6 +59,7 @@ class AppState extends ChangeNotifier {
   int _beginAuthentication() {
     final generation = ++_authGeneration;
     contactLinks.setSession(null);
+    if (_authGeneration == generation) notifications.setSession(null);
     return generation;
   }
 
@@ -300,8 +307,13 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> loadAlertHistory() async {
+    final generation = _authGeneration;
     final data = await _api.fetchAlertHistory();
+    if (!_currentAuthentication(generation)) return;
+    _setAlertHistory(data);
+  }
 
+  void _setAlertHistory(List<Map<String, dynamic>> data) {
     alertHistory
       ..clear()
       ..addAll(
@@ -332,6 +344,55 @@ class AppState extends ChangeNotifier {
       );
 
     notifyListeners();
+  }
+
+  /// Resolve only a source returned by the caller's real authorized history.
+  Future<bool> loadNotificationAlertHistory(int alertId) async {
+    final generation = _authGeneration;
+    final data = await _api.fetchAlertHistory();
+    if (!_currentAuthentication(generation)) return false;
+    final accessible = data.any((row) =>
+        (row['kind'] == 'nearby_received' ? row['alert_id'] : row['id']) ==
+        alertId);
+    if (accessible) _setAlertHistory(data);
+    return _currentAuthentication(generation) && accessible;
+  }
+
+  /// Match the notification ID exactly; never substitute the nearest alert.
+  Future<NearbyPerson?> findNotificationNearbyAlert(int alertId) async {
+    final generation = _authGeneration;
+    final position = await _location.getCurrentLocation();
+    if (!_currentAuthentication(generation)) return null;
+    final data = await _api.fetchNearbyAlerts(
+        latitude: position.lat, longitude: position.lng);
+    if (!_currentAuthentication(generation)) return null;
+    final row = data
+        .where((row) => row['id'] == alertId && row['status'] == 'active')
+        .firstOrNull;
+    if (row == null) return null;
+    final distance = row['distance_km'];
+    final lat = row['latitude'];
+    final lng = row['longitude'];
+    if (distance is! num ||
+        !distance.isFinite ||
+        distance < 0 ||
+        lat is! num ||
+        lng is! num) {
+      throw const ApiFailure(ApiFailureKind.invalidResponse);
+    }
+    final person = NearbyPerson(
+        id: alertId,
+        name: 'Emergency nearby',
+        distanceLabel: '$distance km away',
+        locationLabel: row['location_label']?.toString() ?? '',
+        status: 'active',
+        createdAt: DateTime.parse(row['created_at'].toString()),
+        latitude: lat.toDouble(),
+        longitude: lng.toDouble());
+    if (!person.hasValidLocation) {
+      throw const ApiFailure(ApiFailureKind.invalidResponse);
+    }
+    return person;
   }
 
   Future<void> addContact(
@@ -509,12 +570,18 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> acknowledgeNearbyAlert() async {
-    final person = nearbyPerson;
+  Future<void> acknowledgeNearbyAlert(
+      {NearbyPerson? notificationAlert, int? notificationSession}) async {
+    final session = notifications.sessionVersion;
+    if (notificationSession != null && session != notificationSession) {
+      throw const ApiFailure(ApiFailureKind.authentication);
+    }
+    final person = notificationAlert ?? nearbyPerson;
 
     if (person == null) return;
 
     final acknowledgement = await _api.acknowledgeAlert(person.id);
+    if (_disposed || session != notifications.sessionVersion) return;
 
     alertHistory.insert(
       0,
@@ -540,6 +607,8 @@ class AppState extends ChangeNotifier {
     _authGeneration++;
     contactLinks.removeListener(_onContactLinksChanged);
     contactLinks.dispose();
+    notifications.removeListener(_onContactLinksChanged);
+    notifications.dispose();
     super.dispose();
   }
 }

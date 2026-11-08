@@ -11,11 +11,13 @@ class HomeScreen extends StatelessWidget {
     required this.onActivatePanic,
     required this.onOpenContacts,
     required this.onOpenAlerts,
+    this.onOpenNotifications,
   });
 
   final VoidCallback onActivatePanic;
   final VoidCallback onOpenContacts;
   final VoidCallback onOpenAlerts;
+  final VoidCallback? onOpenNotifications;
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -28,11 +30,16 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final rawName = state.userProfile.name.trim();
-    final firstName = rawName.isEmpty ? 'there' : rawName.split(RegExp(r'\s+')).first;
+    final firstName =
+        rawName.isEmpty ? 'there' : rawName.split(RegExp(r'\s+')).first;
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: const TopBrandBar(),
+      appBar: TopBrandBar(
+          onBellTap: onOpenNotifications,
+          unreadCount: state.notifications.unreadCount,
+          countUnavailable: state.notifications.countError != null ||
+              state.notifications.isAccessBlocked),
       body: SafeArea(
         top: false,
         child: SingleChildScrollView(
@@ -41,27 +48,29 @@ class HomeScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('${_greeting()}, $firstName',
-                      style: textTheme.headlineMedium?.copyWith(fontSize: 26)),
-                  const SizedBox(height: 6),
-                  const Row(
-                    children: [
-                      Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 18),
-                      SizedBox(width: 6),
-                      Text('You are currently safe',
-                          style: TextStyle(
-                              color: AppColors.tealPrimary,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14)),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  Card(
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_greeting()}, $firstName',
+                        style:
+                            textTheme.headlineMedium?.copyWith(fontSize: 26)),
+                    const SizedBox(height: 6),
+                    const Row(
+                      children: [
+                        Icon(Icons.verified_user,
+                            color: AppColors.tealPrimary, size: 18),
+                        SizedBox(width: 6),
+                        Text('You are currently safe',
+                            style: TextStyle(
+                                color: AppColors.tealPrimary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14)),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Card(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),
@@ -116,59 +125,61 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ),
                     ),
-                  const SizedBox(height: 28),
+                    const SizedBox(height: 28),
+                  ],
+                ),
+              ),
+              Column(
+                children: [
+                  _PanicButton(onTap: onActivatePanic),
+                  const SizedBox(height: 12),
+                  const Text('Press and hold for 3 seconds',
+                      style:
+                          TextStyle(color: AppColors.textMuted, fontSize: 13)),
                 ],
               ),
-            ),
-            Column(
-              children: [
-                _PanicButton(onTap: onActivatePanic),
-                const SizedBox(height: 12),
-                const Text('Press and hold for 3 seconds',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
-              ],
-            ),
-            const SizedBox(height: 28),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _QuickAction(
-                      icon: Icons.near_me,
-                      label: 'Share Live\nLocation',
-                      onTap: () {},
+              const SizedBox(height: 28),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _QuickAction(
+                        icon: Icons.near_me,
+                        label: 'Share Live\nLocation',
+                        onTap: () {},
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _QuickAction(
-                      icon: Icons.groups,
-                      label: 'Emergency\nContacts',
-                      onTap: onOpenContacts,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _QuickAction(
+                        icon: Icons.groups,
+                        label: 'Emergency\nContacts',
+                        onTap: onOpenContacts,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _QuickAction(
-                      icon: Icons.notifications_active,
-                      label: 'Nearby\nAlerts',
-                      onTap: onOpenAlerts,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _QuickAction(
+                        icon: Icons.notifications_active,
+                        label: 'Nearby\nAlerts',
+                        onTap: onOpenAlerts,
+                      ),
                     ),
-                  ),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-    ),
-  ),
-);
-}
+    );
+  }
 }
 
 class _QuickAction extends StatelessWidget {
-  const _QuickAction({required this.icon, required this.label, required this.onTap});
+  const _QuickAction(
+      {required this.icon, required this.label, required this.onTap});
 
   final IconData icon;
   final String label;
@@ -188,7 +199,8 @@ class _QuickAction extends StatelessWidget {
               Container(
                 width: 40,
                 height: 40,
-                decoration: const BoxDecoration(color: AppColors.tealBg, shape: BoxShape.circle),
+                decoration: const BoxDecoration(
+                    color: AppColors.tealBg, shape: BoxShape.circle),
                 alignment: Alignment.center,
                 child: Icon(icon, color: AppColors.tealPrimary, size: 20),
               ),
@@ -197,7 +209,9 @@ class _QuickAction extends StatelessWidget {
                 label,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navyDark),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.navyDark),
               ),
             ],
           ),
@@ -233,7 +247,8 @@ class _PanicButton extends StatelessWidget {
             Container(
               width: 180,
               height: 180,
-              decoration: const BoxDecoration(color: AppColors.redAlert, shape: BoxShape.circle),
+              decoration: const BoxDecoration(
+                  color: AppColors.redAlert, shape: BoxShape.circle),
               alignment: Alignment.center,
               child: const Column(
                 mainAxisSize: MainAxisSize.min,
@@ -242,7 +257,9 @@ class _PanicButton extends StatelessWidget {
                   SizedBox(height: 4),
                   Text('PANIC',
                       style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22)),
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 22)),
                 ],
               ),
             ),

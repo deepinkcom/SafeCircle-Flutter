@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_db
 from app.contact_links import ContactLinkResponse, _link_response, _link_responses, router
 from app.contacts import router as contacts_router
-from app.models import EmergencyContact, EmergencyContactLink, User
+from app.models import EmergencyContact, Device, EmergencyContactLink, Notification, PushDelivery, User
 
 
 RELATIONSHIP_REQUESTS = [
@@ -41,7 +41,7 @@ def database(tmp_path):
         connection.execute("PRAGMA foreign_keys=ON")
 
     # Exclude unrelated PostGIS tables; use the real user/contact/link models.
-    for model in (User, EmergencyContact, EmergencyContactLink):
+    for model in (User, EmergencyContact, EmergencyContactLink, Device, Notification, PushDelivery):
         model.__table__.create(engine)
     with Session(engine) as db:
         db.add_all([
@@ -664,6 +664,8 @@ def test_missing_counterparty_returns_null_without_substituting_another_user(cli
         connection.commit()
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
         assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+    with Session(database) as db:
+        before_notifications = db.execute(select(Notification.__table__)).all()
     if operation in ("accept", "reject"):
         response = respond(client, link["id"], operation, 1)
         result = response.json()
@@ -680,6 +682,8 @@ def test_missing_counterparty_returns_null_without_substituting_another_user(cli
     assert result["other_user_id"] == 2
     assert result["other_user"] is None
     assert "User 3" not in response.text and "user3@example.invalid" not in response.text
+    with Session(database) as db:
+        assert db.execute(select(Notification.__table__)).all() == before_notifications
 
 
 @pytest.mark.parametrize("identity", [

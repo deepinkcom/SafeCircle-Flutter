@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .auth import get_current_user, get_db
 from .models import EmergencyContactLink, User
+from .notification_events import record_connection_event
 
 
 router = APIRouter(
@@ -190,14 +191,24 @@ def send_invitation(
 
     try:
         db.add(link)
-        db.commit()
-        db.refresh(link)
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=409,
             detail="An active invitation already exists",
         )
+
+    try:
+        record_connection_event(
+            db, link=link, recipient_user_id=target_user.id,
+            event_type="connection.invited", created_at=link.created_at,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(link)
 
     return _link_responses([link], current_user.id, db)[0]
 
@@ -300,7 +311,15 @@ def respond_to_invitation(
     link.responded_at = now
     link.updated_at = now
 
-    db.commit()
+    try:
+        record_connection_event(
+            db, link=link, recipient_user_id=link.inviter_user_id,
+            event_type=f"connection.{link.status}", created_at=now,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(link)
 
     return _link_responses([link], current_user.id, db)[0]
@@ -342,7 +361,15 @@ def revoke_relationship(
     link.revoked_at = now
     link.updated_at = now
 
-    db.commit()
+    try:
+        record_connection_event(
+            db, link=link, recipient_user_id=_other_user_id(link, current_user.id),
+            event_type="connection.revoked", created_at=now,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(link)
 
     return _link_responses([link], current_user.id, db)[0]

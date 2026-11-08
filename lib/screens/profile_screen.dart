@@ -6,18 +6,23 @@ import '../theme/app_colors.dart';
 import '../widgets/top_brand_bar.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key, required this.onOpenContacts, required this.onLogOut});
+  const ProfileScreen(
+      {super.key,
+      required this.onOpenContacts,
+      required this.onLogOut,
+      this.onOpenNotifications,
+      this.onNotificationSettings});
 
   final VoidCallback onOpenContacts;
   final VoidCallback onLogOut;
+  final VoidCallback? onOpenNotifications;
+  final VoidCallback? onNotificationSettings;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  bool _notificationsEnabled = true;
-
   Future<void> _editPersonalDetails() async {
     final profile = context.read<AppState>().userProfile;
     final saved = await showDialog<bool>(
@@ -36,18 +41,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: const TopBrandBar(),
+      appBar: TopBrandBar(
+          onBellTap: widget.onOpenNotifications,
+          unreadCount: context.watch<AppState>().notifications.unreadCount,
+          countUnavailable:
+              context.watch<AppState>().notifications.countError != null),
       body: SafeArea(
         top: false,
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           children: [
-            Text('Profile & Settings', style: textTheme.headlineMedium?.copyWith(fontSize: 26)),
+            Text('Profile & Settings',
+                style: textTheme.headlineMedium?.copyWith(fontSize: 26)),
             const Text('Manage your account and preferences',
                 style: TextStyle(color: AppColors.textMuted)),
             const SizedBox(height: 16),
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
@@ -55,50 +66,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Container(
                       width: 64,
                       height: 64,
-                      decoration: const BoxDecoration(color: AppColors.tealBg, shape: BoxShape.circle),
+                      decoration: const BoxDecoration(
+                          color: AppColors.tealBg, shape: BoxShape.circle),
                       alignment: Alignment.center,
-                      child: const Icon(Icons.person, color: AppColors.tealPrimary, size: 32),
+                      child: const Icon(Icons.person,
+                          color: AppColors.tealPrimary, size: 32),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(profile.name.isEmpty ? 'SafeCircle member' : profile.name,
-                            style: textTheme.titleLarge),
-                        if (profile.email.isNotEmpty)
-                          Text(profile.email,
-                              style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
-                        if (profile.phone.isNotEmpty)
-                          Text(profile.phone,
-                              style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
-                        if (profile.city.isNotEmpty)
-                          Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                              profile.name.isEmpty
+                                  ? 'SafeCircle member'
+                                  : profile.name,
+                              style: textTheme.titleLarge),
+                          if (profile.email.isNotEmpty)
+                            Text(profile.email,
+                                style: const TextStyle(
+                                    color: AppColors.textMuted, fontSize: 13)),
+                          if (profile.phone.isNotEmpty)
+                            Text(profile.phone,
+                                style: const TextStyle(
+                                    color: AppColors.textMuted, fontSize: 13)),
+                          if (profile.city.isNotEmpty)
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on,
+                                    color: AppColors.textMuted, size: 14),
+                                const SizedBox(width: 3),
+                                Flexible(
+                                  child: Text(profile.city,
+                                      style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 13)),
+                                ),
+                              ],
+                            ),
+                          const SizedBox(height: 2),
+                          const Row(
                             children: [
-                              const Icon(Icons.location_on, color: AppColors.textMuted, size: 14),
-                              const SizedBox(width: 3),
+                              Icon(Icons.verified_user,
+                                  color: AppColors.tealPrimary, size: 14),
+                              SizedBox(width: 3),
                               Flexible(
-                                child: Text(profile.city,
-                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                                child: Text('Safety community member',
+                                    style: TextStyle(
+                                        color: AppColors.tealPrimary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600)),
                               ),
                             ],
                           ),
-                        const SizedBox(height: 2),
-                        const Row(
-                          children: [
-                            Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 14),
-                            SizedBox(width: 3),
-                            Flexible(
-                              child: Text('Safety community member',
-                                  style: TextStyle(
-                                      color: AppColors.tealPrimary,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600)),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -117,13 +139,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               subtitle: 'Manage location sharing and privacy',
               onTap: () {},
             ),
-            _SettingsToggleRow(
-              icon: Icons.notifications,
-              title: 'Notifications',
-              subtitle: 'Manage your alert and app notifications',
-              value: _notificationsEnabled,
-              onChanged: (v) => setState(() => _notificationsEnabled = v),
-            ),
+            _SettingsRow(
+                icon: Icons.notifications,
+                title: 'Notification permissions',
+                subtitle:
+                    'Device permission only; no account-wide preference is configured.',
+                onTap: widget.onNotificationSettings ?? () {}),
             _SettingsRow(
               icon: Icons.groups,
               title: 'Emergency Contacts',
@@ -147,7 +168,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Card(
               color: AppColors.tealBg,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
@@ -155,16 +177,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Container(
                       width: 34,
                       height: 34,
-                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                      decoration: const BoxDecoration(
+                          color: Colors.white, shape: BoxShape.circle),
                       alignment: Alignment.center,
-                      child: const Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 18),
+                      child: const Icon(Icons.verified_user,
+                          color: AppColors.tealPrimary, size: 18),
                     ),
                     const SizedBox(width: 10),
                     const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text("Together, we're building",
-                            style: TextStyle(color: AppColors.navyDark, fontSize: 13)),
+                            style: TextStyle(
+                                color: AppColors.navyDark, fontSize: 13)),
                         Text('safer communities.',
                             style: TextStyle(
                                 color: AppColors.tealPrimary,
@@ -223,59 +248,19 @@ class _SettingsRow extends StatelessWidget {
                           style: Theme.of(context)
                               .textTheme
                               .titleMedium
-                              ?.copyWith(color: danger ? AppColors.redAlert : AppColors.navyDark)),
-                      Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+                              ?.copyWith(
+                                  color: danger
+                                      ? AppColors.redAlert
+                                      : AppColors.navyDark)),
+                      Text(subtitle,
+                          style: Theme.of(context).textTheme.bodyMedium),
                     ],
                   ),
                 ),
-                Icon(danger ? Icons.arrow_forward : Icons.chevron_right, color: tint),
+                Icon(danger ? Icons.arrow_forward : Icons.chevron_right,
+                    color: tint),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsToggleRow extends StatelessWidget {
-  const _SettingsToggleRow({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const Icon(Icons.notifications, color: AppColors.tealPrimary, size: 22),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: Theme.of(context).textTheme.titleMedium),
-                    Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-                  ],
-                ),
-              ),
-              Switch(value: value, onChanged: onChanged),
-            ],
           ),
         ),
       ),
@@ -360,7 +345,8 @@ class _PersonalDetailsDialogState extends State<_PersonalDetailsDialog> {
                 widget.profile.email.isEmpty
                     ? 'Email is your sign-in address'
                     : widget.profile.email,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                style:
+                    const TextStyle(color: AppColors.textMuted, fontSize: 13),
               ),
             ),
             const SizedBox(height: 12),
@@ -377,7 +363,9 @@ class _PersonalDetailsDialogState extends State<_PersonalDetailsDialog> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: const TextStyle(color: AppColors.redAlert, fontSize: 13)),
+              Text(_error!,
+                  style:
+                      const TextStyle(color: AppColors.redAlert, fontSize: 13)),
             ],
           ],
         ),

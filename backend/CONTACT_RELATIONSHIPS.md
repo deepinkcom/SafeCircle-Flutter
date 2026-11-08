@@ -1,5 +1,13 @@
 # Emergency contact relationships (Tasks 1 and 2)
 
+Stage 3B adds transactional recipient notifications for new connection mutations.
+Deployments using those handlers require the new `b6e9c2d4f810` notification
+migration after `8c2f7d1a6b90`. No migration may be applied to development without
+separate approval. See [NOTIFICATIONS.md](NOTIFICATIONS.md) for event recipients,
+read-state independence, failure/rollback semantics, and the complete inbox API.
+Earlier statements below about no Task 2 migration refer to the original Task 2
+implementation; the subsequent Stage 3B prerequisite is additional.
+
 `emergency_contact_links` records explicit invitations between existing `users`
 rows. It is separate from the legacy phone-based `emergency_contacts` table.
 No phone matching, backfill, account linking, legacy-contact conversion, contact
