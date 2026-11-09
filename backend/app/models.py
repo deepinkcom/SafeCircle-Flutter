@@ -120,7 +120,7 @@ class Device(Base):
         nullable=False,
     )
 
-    
+
 class EmergencyContactLink(Base):
     """
     Represents an invitation or accepted emergency-contact relationship
