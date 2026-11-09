@@ -1,4 +1,5 @@
 
+// Stage 3E photo-field changes are local and UNTESTED; not deployed.
 rules_version = '2';
 
 service cloud.firestore {
@@ -12,7 +13,7 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    function validUserProfile(data) {
+    function validUserProfile(data, uid) {
       return data.keys().hasAll([
           'name',
           'city',
@@ -27,27 +28,33 @@ service cloud.firestore {
           'email',
           'phone',
           'createdAt',
-          'updatedAt'
+          'updatedAt',
+          'photoStoragePath'
         ])
         && data.name is string
         && data.city is string
         && data.email is string
-        && data.phone is string;
+        && data.phone is string
+        && (!('photoStoragePath' in data)
+          || data.photoStoragePath == null
+          || (data.photoStoragePath is string
+            && uid.matches('^[A-Za-z0-9_-]{1,128}$')
+            && data.photoStoragePath.matches('^profilePhotos/' + uid + '/[a-f0-9]{32}[.]png$')));
     }
 
     match /users/{uid} {
       allow read: if ownsUserProfile(uid);
 
       allow create: if ownsUserProfile(uid)
-        && validUserProfile(request.resource.data)
+        && validUserProfile(request.resource.data, uid)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
 
       allow update: if ownsUserProfile(uid)
-        && validUserProfile(request.resource.data)
+        && validUserProfile(request.resource.data, uid)
         && request.resource.data.diff(resource.data)
           .affectedKeys()
-          .hasOnly(['name', 'city', 'phone', 'updatedAt'])
+          .hasOnly(['name', 'city', 'phone', 'updatedAt', 'photoStoragePath'])
         && request.resource.data.updatedAt == request.time;
 
       allow delete: if false;

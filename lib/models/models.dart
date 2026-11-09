@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'profile_photo.dart';
 
 enum AlertKind { emergencySent, nearbyReceived, testSent }
 
@@ -68,6 +69,7 @@ class UserProfile {
   final String city;
   final String email;
   final String phone;
+  final String? photoStoragePath;
 
   const UserProfile({
     this.uid = '',
@@ -75,6 +77,7 @@ class UserProfile {
     required this.city,
     this.email = '',
     this.phone = '',
+    this.photoStoragePath,
   });
 
   bool get isSignedIn => uid.isNotEmpty;
@@ -85,6 +88,8 @@ class UserProfile {
     String? city,
     String? email,
     String? phone,
+    String? photoStoragePath,
+    bool clearPhoto = false,
   }) =>
       UserProfile(
         uid: uid ?? this.uid,
@@ -92,6 +97,8 @@ class UserProfile {
         city: city ?? this.city,
         email: email ?? this.email,
         phone: phone ?? this.phone,
+        photoStoragePath:
+            clearPhoto ? null : photoStoragePath ?? this.photoStoragePath,
       );
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> data) {
@@ -101,6 +108,10 @@ class UserProfile {
       city: data['city']?.toString() ?? '',
       email: data['email']?.toString() ?? '',
       phone: data['phone']?.toString() ?? '',
+      photoStoragePath: data['photoStoragePath'] is String &&
+              ProfilePhotoReference.valid(uid, data['photoStoragePath'] as String)
+          ? data['photoStoragePath'] as String
+          : null,
     );
   }
 
@@ -109,6 +120,7 @@ class UserProfile {
     'city': city,
     'email': email,
     'phone': phone,
+    if (photoStoragePath != null) 'photoStoragePath': photoStoragePath,
   };
 }
 
