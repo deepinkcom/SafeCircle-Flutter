@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
@@ -7,6 +10,8 @@ import 'contact_links_state.dart';
 import 'notifications_state.dart';
 import '../services/api_failure.dart';
 import '../models/backend_profile_status.dart';
+import '../models/profile_photo.dart';
+import '../services/profile_photo_service.dart';
 import 'package:intl/intl.dart';
 
 /// Central, observable app state. Screens read from this via
@@ -19,9 +24,12 @@ class AppState extends ChangeNotifier {
     ApiService? apiService,
     LocationService? locationService,
     AuthService? authService,
+    ProfilePhotoService? profilePhotoService,
   })  : _api = apiService ?? ApiService(),
         _location = locationService ?? LocationService(),
-        _auth = authService ?? AuthService() {
+        _auth = authService ?? AuthService(),
+        _photos = profilePhotoService ?? ProfilePhotoService() {
+    _photos.onSessionInvalidated = _onPhotoSessionInvalidated;
     contactLinks = ContactLinksState(apiService: _api);
     contactLinks.addListener(_onContactLinksChanged);
     notifications = NotificationsState(apiService: _api);
@@ -31,6 +39,7 @@ class AppState extends ChangeNotifier {
   final ApiService _api;
   final LocationService _location;
   final AuthService _auth;
+  final ProfilePhotoService _photos;
   late final ContactLinksState contactLinks;
   late final NotificationsState notifications;
   bool _disposed = false;
@@ -41,6 +50,176 @@ class AppState extends ChangeNotifier {
   bool _checkingBackendProfile = false;
   bool _savingProfile = false;
   bool get savingProfile => _savingProfile;
+
+  Uint8List? _photoBytes;
+  bool _photoBusy = false;
+  bool _photoLoading = false;
+  bool _photoNeedsRefresh = false;
+  double? _photoProgress;
+  String? _photoError;
+  int _photoVersion = 0;
+  int _photoSessionGeneration = 0;
+  Uint8List? get profilePhotoBytes =>
+      _photos.isCurrentOwner(userProfile.uid) ? _photoBytes : null;
+  bool get photoBusy => _photoBusy;
+  bool get photoLoading => _photoLoading;
+  bool get photoNeedsRefresh => _photoNeedsRefresh;
+  bool get photoCameraSupported => _photos.cameraSupported;
+  double? get photoProgress => _photoProgress;
+  String? get photoError => _photoError;
+  int get photoSessionVersion => _photoSessionGeneration;
+
+  void _onPhotoSessionInvalidated() {
+    if (_disposed) return;
+    _photoVersion++;
+    _photoSessionGeneration++;
+    _discardPhotoBytes();
+    _photoBusy = false;
+    _photoLoading = false;
+    _photoProgress = null;
+    _photoNeedsRefresh = true;
+    _photoError = 'The photo session changed. Close the editor and refresh after signing in.';
+    notifyListeners();
+  }
+
+  void _discardPhotoBytes() {
+    final bytes = _photoBytes;
+    _photoBytes = null;
+    if (bytes != null) {
+      unawaited(MemoryImage(bytes).evict().catchError((Object _) => false));
+      bytes.fillRange(0, bytes.length, 0);
+    }
+  }
+
+  void _resetProfilePhoto(String? uid) {
+    _photoVersion++;
+    _photoSessionGeneration++;
+    _photos.setSession(uid);
+    _discardPhotoBytes();
+    _photoBusy = false;
+    _photoLoading = false;
+    _photoNeedsRefresh = false;
+    _photoProgress = null;
+    _photoError = null;
+  }
+
+  Future<bool> refreshProfilePhoto() async {
+    if (_disposed || !userProfile.isSignedIn || _photoBusy) return false;
+    final uid = userProfile.uid;
+    final generation = _authGeneration;
+    final version = ++_photoVersion;
+    bool current() => _currentAuthentication(generation) &&
+        uid == userProfile.uid && version == _photoVersion;
+    _photoLoading = true;
+    _photoError = null;
+    notifyListeners();
+    try {
+      final result = await _photos.load(uid: uid, isCurrent: current);
+      if (!current()) {
+        final staleBytes = result.bytes;
+        if (staleBytes != null) staleBytes.fillRange(0, staleBytes.length, 0);
+        return false;
+      }
+      if (result.bytes != null || result.path != userProfile.photoStoragePath) {
+        _discardPhotoBytes();
+        _photoBytes = result.bytes;
+      }
+      _userProfile = userProfile.copyWith(photoStoragePath: result.path, clearPhoto: result.path == null);
+      _photoNeedsRefresh = false; // Metadata was read from the server.
+      _photoError = result.warning;
+      return true;
+    } catch (error) {
+      if (current()) {
+        _photoError = error is ProfilePhotoFailure
+            ? error.message : 'Your picture could not be loaded. Please retry.';
+      }
+      return false;
+    } finally {
+      if (current()) {
+        _photoLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<ProfilePhotoDraft?> selectProfilePhoto(ProfilePhotoSource source) async {
+    if (_disposed || !userProfile.isSignedIn || _photoBusy || _savingProfile) return null;
+    final uid = userProfile.uid;
+    final generation = _authGeneration;
+    bool current() => _currentAuthentication(generation) && uid == userProfile.uid;
+    _photoBusy = true;
+    _photoError = null;
+    notifyListeners();
+    try {
+      final draft = await _photos.pick(uid: uid, source: source, isCurrent: current);
+      if (!current()) {
+        draft?.dispose();
+        return null;
+      }
+      return draft;
+    } catch (error) {
+      if (current()) _photoError = error is ProfilePhotoFailure
+          ? error.message : 'Picture selection failed. Check access and try again.';
+      return null;
+    } finally {
+      if (current()) {
+        _photoBusy = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<bool> saveProfilePhoto(ProfilePhotoDraft draft) => _changeProfilePhoto(draft);
+  Future<bool> removeProfilePhoto() => _changeProfilePhoto(null);
+
+  Future<bool> _changeProfilePhoto(ProfilePhotoDraft? draft) async {
+    if (_disposed || !userProfile.isSignedIn || _photoBusy || _savingProfile || _photoNeedsRefresh) {
+      return false;
+    }
+    if (draft == null && userProfile.photoStoragePath == null) return false;
+    final uid = userProfile.uid;
+    final generation = _authGeneration;
+    final version = ++_photoVersion;
+    bool current() => _currentAuthentication(generation) &&
+        uid == userProfile.uid && version == _photoVersion;
+    _photoBusy = true;
+    _photoLoading = false;
+    _photoError = null;
+    _photoProgress = null;
+    notifyListeners();
+    try {
+      final result = await _photos.save(uid: uid, expectedPath: userProfile.photoStoragePath,
+        draft: draft, isCurrent: current, onProgress: (progress) {
+          if (current()) {
+            _photoProgress = progress;
+            notifyListeners();
+          }
+        });
+      if (!current()) {
+        final staleBytes = result.bytes;
+        if (staleBytes != null) staleBytes.fillRange(0, staleBytes.length, 0);
+        return false;
+      }
+      _discardPhotoBytes();
+      _photoBytes = result.bytes;
+      _userProfile = userProfile.copyWith(photoStoragePath: result.path, clearPhoto: result.path == null);
+      _photoError = result.warning;
+      return true;
+    } catch (error) {
+      if (current()) {
+        _photoError = error is ProfilePhotoFailure
+            ? error.message : 'Your picture could not be updated. Refresh before trying again.';
+        _photoNeedsRefresh = error is! ProfilePhotoFailure || error.requiresRefresh;
+      }
+      return false;
+    } finally {
+      if (current()) {
+        _photoBusy = false;
+        _photoProgress = null;
+        notifyListeners();
+      }
+    }
+  }
 
   BackendProfileStatus? get backendProfile => _backendProfile;
   ApiFailure? get backendProfileError => _backendProfileError;
@@ -106,13 +285,22 @@ class AppState extends ChangeNotifier {
 
   set userProfile(UserProfile profile) {
     if (_disposed) return;
+    final photoChanged = profile.uid != _userProfile.uid ||
+        profile.photoStoragePath != _userProfile.photoStoragePath ||
+        !_photos.sessionMatches(profile.uid);
     if (profile.uid != _userProfile.uid) {
       _authGeneration++;
       _resetBackendProfile();
     }
     _userProfile = profile;
+    if (photoChanged) {
+      _resetProfilePhoto(profile.uid);
+    }
     contactLinks.setSession(profile.uid);
     notifications.setSession(_userProfile.uid);
+    if (photoChanged && profile.isSignedIn && profile.photoStoragePath != null) {
+      unawaited(refreshProfilePhoto());
+    }
   }
 
   void _onContactLinksChanged() {
@@ -122,6 +310,7 @@ class AppState extends ChangeNotifier {
   int _beginAuthentication() {
     final generation = ++_authGeneration;
     _resetBackendProfile();
+    _resetProfilePhoto(null);
     contactLinks.setSession(null);
     if (_authGeneration == generation) notifications.setSession(null);
     return generation;
@@ -244,7 +433,7 @@ class AppState extends ChangeNotifier {
     required String city,
   }) async {
     if (_disposed) return 'This profile update is no longer active.';
-    if (_savingProfile) {
+    if (_savingProfile || _photoBusy) {
       return 'Your details are already being saved. Please wait.';
     }
     if (!userProfile.isSignedIn) {
@@ -276,7 +465,11 @@ class AppState extends ChangeNotifier {
       if (updatedProfile.uid != owner) {
         return 'The account changed. Please sign in again.';
       }
-      userProfile = updatedProfile;
+      // The text-only repository update must not roll back a concurrent photo read.
+      userProfile = updatedProfile.copyWith(
+        photoStoragePath: userProfile.photoStoragePath,
+        clearPhoto: userProfile.photoStoragePath == null,
+      );
       notifyListeners();
 
       if (updatedProfile.uid.isEmpty ||
@@ -719,6 +912,8 @@ class AppState extends ChangeNotifier {
     _disposed = true;
     _authGeneration++;
     _resetBackendProfile();
+    _resetProfilePhoto(null);
+    _photos.dispose();
     contactLinks.removeListener(_onContactLinksChanged);
     contactLinks.dispose();
     notifications.removeListener(_onContactLinksChanged);

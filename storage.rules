@@ -1,0 +1,32 @@
+// Stage 3E DRAFT: emulator/security review required. NOT DEPLOYED.
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /profilePhotos/{uid}/{objectName} {
+      function owner() {
+        return request.auth != null && request.auth.uid == uid
+          && uid.matches('^[A-Za-z0-9_-]{1,128}$')
+          && objectName.matches('^[a-f0-9]{32}[.]png$');
+      }
+      function profileExists() {
+        return firestore.exists(/databases/(default)/documents/users/$(uid));
+      }
+      function isCurrentPhoto() {
+        let data = firestore.get(/databases/(default)/documents/users/$(uid)).data;
+        return 'photoStoragePath' in data
+          && data.photoStoragePath == 'profilePhotos/' + uid + '/' + objectName;
+      }
+      allow get: if owner() && profileExists() && isCurrentPhoto();
+      allow list: if false;
+      allow create: if owner() && profileExists()
+        && request.resource.size > 0 && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType == 'image/png'
+        && request.resource.metadata.ownerUid == uid;
+      allow update: if false; // Immutable random objects, no overwrites.
+      allow delete: if owner() && profileExists() && !isCurrentPhoto();
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
