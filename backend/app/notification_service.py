@@ -83,3 +83,17 @@ class NotificationService:
                 success=False,
                 error="Notification delivery failed",
             )
+
+
+def firebase_notification_delivery(token, notification, recipient_uid):
+    from datetime import timedelta
+    from firebase_admin import messaging
+    from .auth import initialize_firebase
+    initialize_firebase()
+    message = messaging.Message(
+        notification=messaging.Notification(title="SafeCircle", body="You have a SafeCircle update."),
+        data={"notification_id": str(notification.id), "recipient_uid": recipient_uid},
+        android=messaging.AndroidConfig(priority="high", ttl=timedelta(hours=24),
+            notification=messaging.AndroidNotification(channel_id="safecircle_alerts", tag=f"safecircle-{notification.id}")),
+        token=token)
+    return messaging.send(message)

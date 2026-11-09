@@ -1,8 +1,31 @@
 import 'package:geocoding/geocoding.dart' as geocoding;
 import 'package:geolocator/geolocator.dart';
 
+enum LocationAccess { granted, denied, deniedForever, servicesDisabled }
+
 /// Handles access to the device's GPS location.
 class LocationService {
+  /// Permission-only onboarding; does not request coordinates or send data.
+  Future<LocationAccess> requestPermission() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      return LocationAccess.servicesDisabled;
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    return switch (permission) {
+      LocationPermission.always ||
+      LocationPermission.whileInUse =>
+        LocationAccess.granted,
+      LocationPermission.deniedForever => LocationAccess.deniedForever,
+      _ => LocationAccess.denied,
+    };
+  }
+
+  Future<bool> openLocationSettings() => Geolocator.openLocationSettings();
+  Future<bool> openAppSettings() => Geolocator.openAppSettings();
+
   /// Returns the device's current latitude and longitude.
   Future<({double lat, double lng})> getCurrentLocation() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -42,7 +65,7 @@ class LocationService {
     );
   }
 
-    /// Converts GPS coordinates into a readable address.
+  /// Converts GPS coordinates into a readable address.
   Future<String> getReadableLocation({
     required double lat,
     required double lng,

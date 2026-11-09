@@ -1,8 +1,8 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
+import '../models/models.dart';
 import '../theme/app_colors.dart';
 import '../widgets/real_map.dart';
 import '../widgets/safe_circle_mark.dart';
@@ -12,27 +12,36 @@ class EmergencyNearbyScreen extends StatefulWidget {
     super.key,
     required this.onBack,
     required this.onImOnMyWay,
+    this.notificationAlert,
+    this.notificationSession,
   });
 
   final VoidCallback onBack;
   final Future<void> Function() onImOnMyWay;
+  final NearbyPerson? notificationAlert;
+  final int? notificationSession;
 
   @override
-  State<EmergencyNearbyScreen> createState() =>
-      _EmergencyNearbyScreenState();
+  State<EmergencyNearbyScreen> createState() => _EmergencyNearbyScreenState();
 }
 
-class _EmergencyNearbyScreenState
-    extends State<EmergencyNearbyScreen> {
+class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<AppState>().loadNearbyAlert();
+    if (widget.notificationAlert == null) {
+      context.read<AppState>().loadNearbyAlert();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final person = context.watch<AppState>().nearbyPerson;
+    final state = context.watch<AppState>();
+    final person = widget.notificationAlert == null
+        ? state.nearbyPerson
+        : state.notifications.sessionVersion == widget.notificationSession
+            ? widget.notificationAlert
+            : null;
     final textTheme = Theme.of(context).textTheme;
 
     if (person == null) {
@@ -58,7 +67,7 @@ class _EmergencyNearbyScreenState
                   const SizedBox(height: 12),
                   const Text(
                     'There are no active emergency alerts '
-                        'near your current location.',
+                    'near your current location.',
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
@@ -82,8 +91,7 @@ class _EmergencyNearbyScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding:
-                const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                 child: IconButton(
                   onPressed: widget.onBack,
                   icon: const Icon(Icons.arrow_back),
@@ -107,8 +115,7 @@ class _EmergencyNearbyScreenState
                     ),
                     SizedBox(width: 12),
                     Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Emergency Nearby',
@@ -156,16 +163,13 @@ class _EmergencyNearbyScreenState
 
               // Emergency heading
               Padding(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Someone nearby\nneeds your help',
-                      style:
-                      textTheme.headlineMedium?.copyWith(
+                      style: textTheme.headlineMedium?.copyWith(
                         fontSize: 26,
                       ),
                     ),
@@ -184,20 +188,17 @@ class _EmergencyNearbyScreenState
 
               // Emergency location card
               Padding(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Card(
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                    BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       children: [
                         ClipRRect(
-                          borderRadius:
-                          BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(14),
                           child: Container(
                             height: 150,
                             color: const Color(0xFFE7EEF1),
@@ -208,18 +209,14 @@ class _EmergencyNearbyScreenState
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 14),
-
                         Row(
                           children: [
                             Container(
                               width: 36,
                               height: 36,
-                              decoration:
-                              const BoxDecoration(
-                                color:
-                                AppColors.redAlertLight,
+                              decoration: const BoxDecoration(
+                                color: AppColors.redAlertLight,
                                 shape: BoxShape.circle,
                               ),
                               alignment: Alignment.center,
@@ -237,9 +234,7 @@ class _EmergencyNearbyScreenState
                             ),
                           ],
                         ),
-
                         const SizedBox(height: 10),
-
                         Align(
                           alignment: Alignment.centerLeft,
                           child: _InfoLine(
@@ -248,9 +243,7 @@ class _EmergencyNearbyScreenState
                             color: AppColors.tealPrimary,
                           ),
                         ),
-
                         const SizedBox(height: 6),
-
                         Align(
                           alignment: Alignment.centerLeft,
                           child: _InfoLine(
@@ -265,9 +258,7 @@ class _EmergencyNearbyScreenState
                                 : AppColors.redAlert,
                           ),
                         ),
-
                         const SizedBox(height: 6),
-
                         Align(
                           alignment: Alignment.centerLeft,
                           child: _InfoLine(
@@ -291,8 +282,7 @@ class _EmergencyNearbyScreenState
 
               // Action buttons
               Padding(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(
                   children: [
                     SizedBox(
@@ -301,12 +291,11 @@ class _EmergencyNearbyScreenState
                       child: ElevatedButton.icon(
                         onPressed: () {
                           if (!person.hasValidLocation) {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
+                            ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text(
                                   'Emergency location is '
-                                      'not available yet.',
+                                  'not available yet.',
                                 ),
                               ),
                             );
@@ -315,29 +304,26 @@ class _EmergencyNearbyScreenState
 
                           Navigator.of(context).push(
                             MaterialPageRoute<void>(
-                              builder: (context) =>
-                                  Scaffold(
-                                    appBar: AppBar(
-                                      title: const Text(
-                                        'Emergency Location',
-                                      ),
-                                    ),
-                                    body: SafeArea(
-                                      child: RealMap(
-                                        nearbyPerson: person,
-                                      ),
-                                    ),
+                              builder: (context) => Scaffold(
+                                appBar: AppBar(
+                                  title: const Text(
+                                    'Emergency Location',
                                   ),
+                                ),
+                                body: SafeArea(
+                                  child: RealMap(
+                                    nearbyPerson: person,
+                                  ),
+                                ),
+                              ),
                             ),
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                          AppColors.navyDark,
+                          backgroundColor: AppColors.navyDark,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                            BorderRadius.circular(28),
+                            borderRadius: BorderRadius.circular(28),
                           ),
                         ),
                         icon: const Icon(
@@ -353,21 +339,17 @@ class _EmergencyNearbyScreenState
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 10),
-
                     SizedBox(
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton.icon(
                         onPressed: () {},
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                          AppColors.redAlert,
+                          backgroundColor: AppColors.redAlert,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                            BorderRadius.circular(28),
+                            borderRadius: BorderRadius.circular(28),
                           ),
                         ),
                         icon: const Icon(
@@ -383,9 +365,7 @@ class _EmergencyNearbyScreenState
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 10),
-
                     SizedBox(
                       width: double.infinity,
                       height: 54,
@@ -398,8 +378,7 @@ class _EmergencyNearbyScreenState
                             color: AppColors.tealPrimary,
                           ),
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                            BorderRadius.circular(28),
+                            borderRadius: BorderRadius.circular(28),
                           ),
                         ),
                         icon: const Icon(
@@ -424,8 +403,7 @@ class _EmergencyNearbyScreenState
               const SizedBox(height: 18),
 
               const Padding(
-                padding:
-                EdgeInsets.symmetric(horizontal: 20),
+                padding: EdgeInsets.symmetric(horizontal: 20),
                 child: Row(
                   children: [
                     Icon(
@@ -437,7 +415,7 @@ class _EmergencyNearbyScreenState
                     Expanded(
                       child: Text(
                         'Your location is only shared '
-                            'during emergencies.',
+                        'during emergencies.',
                         style: TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 13,
