@@ -238,6 +238,13 @@ notification push sender or emergency subscription policy.
 
 ## Stage 3C.1 / 3D extension
 
+The retention follow-up is documented in
+[Push-delivery retention](../docs/PUSH_DELIVERY_RETENTION.md). New revision
+`d9a4f6b2c730` follows `c7f0a3e5b921` and has been verified in local development.
+Other environments require separate migration and API/worker restart approval.
+Physical Android account-isolation and real FCM retesting remain pending.
+Inbox contracts and emergency policy are unchanged.
+
 The later notification-management and connection-push implementation supersedes
 this document's original no-worker scope statement. See
 [Stage 3C.1 / 3D status](../docs/STAGE_3C1_3D_STATUS.md) for API extensions,

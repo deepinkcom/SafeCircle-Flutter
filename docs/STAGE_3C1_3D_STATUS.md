@@ -85,3 +85,14 @@ Results are recorded in the implementation report. Backend automated tests use i
 - `lib/state/notifications_state.dart`
 - `test/notification_api_test.dart`
 - `test/notification_management_push_test.dart`
+
+## Push-delivery retention follow-up
+
+See [Push-delivery retention](PUSH_DELIVERY_RETENTION.md). Revision d9a4f6b2c730
+follows c7f0a3e5b921 and preserves delivery rows when registrations are deleted.
+The nullable SET NULL device FK, atomic cancellation, generation-fenced worker and
+bounded subprocess submission passed 326 backend tests, including 21 PostgreSQL
+cases. The approved local migration and compatible API/worker restart were verified
+without changing existing application rows. Other environments need separate approval.
+Physical Android account-isolation and real FCM retesting are postponed and pending.
+Existing emergency policy, Firebase configuration and Flutter routing are unchanged.

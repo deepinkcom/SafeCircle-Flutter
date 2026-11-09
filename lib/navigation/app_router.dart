@@ -57,6 +57,7 @@ class _AuthFlowState extends State<_AuthFlow> {
   bool _notificationRegistrationAttempted = false;
   String? _registeredNotificationUser;
   int? _pendingNotification;
+  bool _logoutInProgress = false;
 
   Future<void>? _initialData;
   final NotificationService _notificationService = NotificationService();
@@ -84,7 +85,7 @@ class _AuthFlowState extends State<_AuthFlow> {
       await _notificationService.handleNotificationTaps();
       debugPrint('Notification listeners started.');
     } catch (error) {
-      debugPrint('Notification listener setup skipped: $error');
+      debugPrint('Notification listener setup skipped.');
     }
 
     if (_notificationRegistrationAttempted) return;
@@ -96,6 +97,7 @@ class _AuthFlowState extends State<_AuthFlow> {
 
       if (status != AuthorizationStatus.authorized &&
           status != AuthorizationStatus.provisional) {
+        _notificationRegistrationAttempted = false;
         debugPrint('Notifications not enabled; device registration skipped.');
         return;
       }
@@ -104,7 +106,8 @@ class _AuthFlowState extends State<_AuthFlow> {
       debugPrint('Notification device registration completed.');
     } catch (error) {
       // Backend registration failures must not block notification setup.
-      debugPrint('Notification registration skipped: $error');
+      _notificationRegistrationAttempted = false;
+      debugPrint('Notification registration skipped.');
     }
   }
 
@@ -117,12 +120,33 @@ class _AuthFlowState extends State<_AuthFlow> {
   }
 
   Future<void> _leaveMain({bool signInAgain = false}) async {
-    _notificationService.bindUser(null);
-    await _notificationService.detachDevice();
+    if (_logoutInProgress) return;
+    _logoutInProgress = true;
+    try {
+      await _notificationService.detachDevice();
+    } catch (_) {
+      _logoutInProgress = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Could not confirm notification cleanup. Check your connection and retry sign out.')));
+      }
+      return;
+    }
     if (!mounted) return;
     _pendingNotification = null;
     _notificationRegistrationAttempted = false;
-    await context.read<AppState>().logOut();
+    try {
+      await context.read<AppState>().logOut();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not finish sign out. Please retry.')));
+      }
+      return;
+    } finally {
+      _logoutInProgress = false;
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     Navigator.of(context).popUntil((route) => route.isFirst);

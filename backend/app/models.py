@@ -238,10 +238,11 @@ class PushDelivery(Base):
         UniqueConstraint("notification_id", "device_id", name="uq_push_delivery_notification_device"),
         CheckConstraint("status IN ('pending','sending','sent','failed','cancelled')", name="ck_push_delivery_status"),
         Index("ix_push_delivery_due", "status", "next_attempt_at"),
+        Index("ix_push_delivery_device", "device_id"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     notification_id: Mapped[int] = mapped_column(ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     attempts: Mapped[int] = mapped_column(default=0, nullable=False)
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

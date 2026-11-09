@@ -56,6 +56,9 @@ class ApiService {
     Map<String, String>? query,
     Map<String, dynamic>? body,
     bool decodeBody = true,
+    String? authorizationToken,
+    bool waitForTransport = false,
+    bool Function()? canStart,
     required T Function(Object?) parse,
   }) async {
     final client = _client ?? http.Client();
@@ -64,12 +67,20 @@ class ApiService {
     Future<T> perform() async {
       final Map<String, String> headers;
       try {
-        headers = await _authHeaders(jsonContent: body != null);
+        headers = authorizationToken == null
+            ? await _authHeaders(jsonContent: body != null)
+            : {
+                'Authorization': 'Bearer $authorizationToken',
+                if (body != null) 'Content-Type': 'application/json'
+              };
       } catch (_) {
         throw const ApiFailure(ApiFailureKind.authentication);
       }
       // A slow token lookup must not start a write after its caller timed out.
       if (expired) throw const ApiFailure(ApiFailureKind.timeout);
+      if (canStart != null && !canStart()) {
+        throw const ApiFailure(ApiFailureKind.authentication);
+      }
       final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
       final request = http.Request(method, uri)
         ..followRedirects = false
@@ -90,6 +101,8 @@ class ApiService {
     }
 
     try {
+      // Device teardown must drain the real transport, not just a UI timeout.
+      if (waitForTransport) return await perform();
       // Includes token retrieval, sending, and receiving the complete body.
       // Writes are never automatically retried: a timeout may follow a commit.
       return await perform().timeout(requestTimeout, onTimeout: () {
@@ -106,6 +119,27 @@ class ApiService {
       throw const ApiFailure(ApiFailureKind.unexpected);
     } finally {
       if (_client == null) client.close();
+    }
+  }
+
+  /// Capture the existing Firebase bearer only while its expected session is
+  /// current. This in-memory scope allows owned cleanup after an account switch
+  /// without accidentally borrowing the newly signed-in account's credentials.
+  Future<DeviceRegistrationSession> openDeviceRegistrationSession(
+      {required bool Function() isCurrent}) async {
+    try {
+      if (!isCurrent()) throw const ApiFailure(ApiFailureKind.authentication);
+      final token = await _tokenProvider().timeout(requestTimeout);
+      if (!isCurrent() || token == null || token.trim().isEmpty) {
+        throw const ApiFailure(ApiFailureKind.authentication);
+      }
+      return DeviceRegistrationSession._(this, token);
+    } on TimeoutException {
+      throw const ApiFailure(ApiFailureKind.timeout);
+    } on ApiFailure {
+      rethrow;
+    } catch (_) {
+      throw const ApiFailure(ApiFailureKind.authentication);
     }
   }
 
@@ -364,4 +398,38 @@ class ApiService {
 
   Future<Map<String, dynamic>> sendTestNotification() =>
       _request('POST', '/test-notifications/me', parse: _object);
+}
+
+/// A short-lived, memory-only bearer scope. It never exposes its token.
+class DeviceRegistrationSession {
+  DeviceRegistrationSession._(this._api, this._token);
+  final ApiService _api;
+  String? _token;
+
+  String get _bearer =>
+      _token ?? (throw const ApiFailure(ApiFailureKind.authentication));
+
+  Future<void> register(
+          {required String fcmToken,
+          required String platform,
+          required bool Function() canStart}) =>
+      _api._request('POST', '/devices',
+          body: {'fcm_token': fcmToken, 'platform': platform},
+          authorizationToken: _bearer,
+          waitForTransport: true,
+          canStart: canStart, parse: (value) {
+        ApiService._object(value);
+      });
+
+  Future<void> unregister(String fcmToken) =>
+      _api._request('DELETE', '/devices',
+          body: {'fcm_token': fcmToken},
+          authorizationToken: _bearer,
+          waitForTransport: true,
+          decodeBody: false,
+          parse: (_) {});
+
+  void close() {
+    _token = null;
+  }
 }
