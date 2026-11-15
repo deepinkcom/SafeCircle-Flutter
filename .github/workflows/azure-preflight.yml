@@ -1,0 +1,35 @@
+name: SafeCircle Azure preflight (no deployment)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "infra/azure/**"
+      - "backend/Dockerfile"
+      - ".github/workflows/azure-preflight.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Validate deployment package (no Azure login or provisioning)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile Azure infrastructure templates
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az bicep build --file infra/azure/container-registry.bicep
+            az bicep build --file infra/azure/postgresql-private.bicep
+            az bicep build --file infra/azure/container-apps.bicep
+
+      - name: Build FastAPI container locally (do not push)
+        run: docker build --tag safecircle-api:preflight ./backend
+
+      - name: Confirm no deployment credentials are required
+        run: |
+          echo "Preflight completed without Azure login."
+          echo "No registry push, resource deployment, database migration, or production change was performed."
