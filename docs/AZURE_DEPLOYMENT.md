@@ -229,3 +229,81 @@ az bicep build --file infra/azure/container-apps.bicep
 Do not run `az deployment group create`, `az containerapp update`,
 `az acr build`, or database bootstrap/migration commands without separate
 explicit approval.
+
+## Azure PostgreSQL and networking template
+
+`infra/azure/postgresql-private.bicep` prepares:
+- A virtual network with a delegated PostgreSQL subnet, a separate Container
+  Apps infrastructure subnet, and a private-endpoint subnet.
+- A private DNS zone and VNet link for PostgreSQL Flexible Server.
+- Azure Database for PostgreSQL Flexible Server with public network access
+  disabled, TLS-capable server networking, automated backups, and a database
+  named `safecircle_db`.
+
+Important: the Container Apps managed environment must be created with the
+`snet-container-apps-infrastructure` subnet from this VNet. The existing
+Container Apps environment cannot simply be moved into this VNet after creation;
+plan the VNet integration before creating that environment. The subnet delegated
+to PostgreSQL must not be shared with Container Apps.
+
+The template defaults to a small Burstable SKU and 32 GiB storage only as a
+starting point for evaluation. This is not a production sizing recommendation.
+Availability zone support, minimum storage, supported SKU/region combinations,
+backup charges, networking charges, and current regional prices must be checked
+in the target region before provisioning. High availability is disabled in this
+preparation template and must be deliberately designed for production.
+
+The template creates the network and database server/database, but it does not
+create the Container Apps environment, route tables, NAT gateway, private
+endpoints for ACR, or a production-ready private DNS architecture for all
+services. Review address spaces for conflicts with any existing corporate or
+home VPN networks before use.
+
+## Azure Container Registry template
+
+`infra/azure/container-registry.bicep` creates an ACR with its admin account
+disabled. The default Basic SKU is a low-cost development starting point. The
+template allows public network access by default so a GitHub-hosted runner can
+reach the registry during a separately approved image-publishing workflow.
+For production private-only registry access, use Premium (required for private
+link), configure the ACR private endpoint and `privatelink.azurecr.io` DNS,
+disable public access, and run image builds/pushes from a runner with network
+connectivity to that private endpoint.
+
+The Container Apps Bicep template uses a user-assigned managed identity with
+the ACR `AcrPull` role; the ACR admin account is not enabled. The image must
+already exist in the registry before the Container Apps template is deployed.
+
+## Cost and operational considerations
+
+No cost estimate is a quote. Actual charges depend on region, currency, usage,
+retention, networking, logs, backups and selected SKUs. Before provisioning,
+use the Azure Pricing Calculator for the chosen region and subscription.
+
+Potential recurring cost components:
+- PostgreSQL Flexible Server compute, provisioned storage, backup storage and
+  optional high availability.
+- Container Apps compute/replicas, especially the always-on API and polling
+  worker. The worker intentionally stays at one replica and will incur ongoing
+  compute charges.
+- ACR storage and selected SKU; Premium costs more but enables private link.
+- Log Analytics ingestion/retention, private DNS, NAT gateway and data transfer
+  where used.
+
+Do not assume scale-to-zero is suitable for this emergency-response application.
+The worker is configured to remain running, and API minimum replicas default to
+one. Confirm availability, recovery objectives and a funded operating budget
+before production.
+
+## CI template validation
+
+CI compiles all three Bicep templates:
+- `infra/azure/container-apps.bicep`
+- `infra/azure/container-registry.bicep`
+- `infra/azure/postgresql-private.bicep`
+
+Compilation is static validation only. It does not deploy resources, validate
+subscription quotas, guarantee regional SKU availability, or prove private
+network connectivity. A future deployment pipeline must use explicit environment
+protection/manual approvals, least-privilege identity, and a reviewed
+`what-if` result before any resource creation.
