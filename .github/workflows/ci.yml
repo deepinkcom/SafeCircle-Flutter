@@ -98,4 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Compile Container Apps Bicep template
-        run: az bicep build --file infra/azure/container-apps.bicep
+        run: |
+          az bicep build --file infra/azure/container-apps.bicep
+          az bicep build --file infra/azure/container-registry.bicep
+          az bicep build --file infra/azure/postgresql-private.bicep
