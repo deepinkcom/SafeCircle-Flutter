@@ -22,6 +22,7 @@ jobs:
         run: |
           az bicep build --file infra/azure/container-registry.bicep
           az bicep build --file infra/azure/postgresql-private.bicep
+          az bicep build --file infra/azure/container-apps-environment.bicep
           az bicep build --file infra/azure/container-apps.bicep
 
       - name: Build FastAPI container locally (do not push)
