@@ -91,3 +91,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build FastAPI image (no push)
         run: docker build --tag safecircle-api:ci ./backend
+
+  azure-template-validation:
+    name: Validate Azure Bicep template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Container Apps Bicep template
+        run: az bicep build --file infra/azure/container-apps.bicep
