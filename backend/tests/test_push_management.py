@@ -97,14 +97,44 @@ def test_unregistered_token_removes_device_without_deleting_inbox(inbox,database
         assert len(db.scalars(select(Notification)).all())==1
 
 
-def test_no_automatic_emergency_delivery(inbox,database):
-    device(database,2,'synthetic-device-two')
+def test_emergency_delivery_worker_sends_owned_jobs(inbox, database):
+    device(database, 2, 'synthetic-emergency-device')
+    calls = []
+
     with Session(database) as db:
-        notice=Notification(recipient_user_id=2,category='emergency',event_type='emergency.synthetic',source_id=7,title='Test',message='Fixture only')
-        db.add(notice);db.flush()
-        db.add(PushDelivery(notification_id=notice.id,device_id=db.scalar(select(Device.id))));db.commit()
-        assert deliver_one(db,lambda *args:pytest.fail('Emergency policy was broadened'))
-        assert db.scalar(select(PushDelivery)).status=='cancelled'
+        notice = Notification(
+            recipient_user_id=2,
+            category='emergency',
+            event_type='emergency.synthetic',
+            source_id=7,
+            title='Emergency alert',
+            message='A contact needs help.',
+        )
+        db.add(notice)
+        db.flush()
+
+        notice_id = notice.id
+        device_id = db.scalar(select(Device.id))
+
+        job = PushDelivery(
+            notification_id=notice.id,
+            device_id=device_id,
+        )
+        db.add(job)
+        db.commit()
+
+        assert deliver_one(
+            db,
+            lambda token, row, uid: calls.append(
+                (token, row.id, uid)
+            ),
+        )
+
+        assert job.status == 'sent'
+
+    assert calls == [
+        ('synthetic-emergency-device', notice_id, 'synthetic-uid-2')
+    ]
 
 
 def test_push_job_insert_failure_rolls_back_relationship_and_notification(inbox, database):

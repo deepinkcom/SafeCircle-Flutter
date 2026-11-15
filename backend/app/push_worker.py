@@ -36,7 +36,7 @@ def _claim(db, now):
     notice = db.get(Notification, job.notification_id)
     device = db.get(Device, job.device_id) if job.device_id is not None else None
     user = db.get(User, notice.recipient_user_id) if notice else None
-    if (notice is None or notice.category != "connection" or notice.deleted_at is not None
+    if (notice is None or notice.category not in {"connection", "emergency"} or notice.deleted_at is not None
             or device is None or user is None or device.user_id != notice.recipient_user_id):
         job.status = "cancelled"
         db.commit()
@@ -68,7 +68,7 @@ def _deliver_claim(db, lease, sender, now=None):
         db.rollback()  # Stale workers neither send nor overwrite newer state.
         return False
     user = db.get(User, notice.recipient_user_id) if notice else None
-    if (device is None or notice is None or user is None or notice.category != "connection"
+    if (device is None or notice is None or user is None or notice.category not in {"connection", "emergency"}
             or notice.deleted_at is not None or device.user_id != notice.recipient_user_id):
         job.status = "cancelled"
         db.commit()
