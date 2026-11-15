@@ -1,4 +1,5 @@
-﻿from datetime import datetime, timezone
+﻿
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -49,6 +50,8 @@ def create_client(fake_db):
 
 def test_test_notification_route_is_disabled_by_default(monkeypatch):
     monkeypatch.delenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", raising=False)
+    monkeypatch.delenv("SAFECIRCLE_ENV", raising=False)
+
     fake_db = FakeSession(device=make_device())
     client = create_client(fake_db)
 
@@ -59,7 +62,9 @@ def test_test_notification_route_is_disabled_by_default(monkeypatch):
 
 
 def test_test_notification_uses_fake_sender_for_current_users_device(monkeypatch):
+    monkeypatch.setenv("SAFECIRCLE_ENV", "development")
     monkeypatch.setenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "true")
+
     fake_db = FakeSession(device=make_device())
     client = create_client(fake_db)
     calls = []
@@ -89,7 +94,9 @@ def test_test_notification_uses_fake_sender_for_current_users_device(monkeypatch
 
 
 def test_test_notification_returns_404_when_no_android_device(monkeypatch):
+    monkeypatch.setenv("SAFECIRCLE_ENV", "development")
     monkeypatch.setenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "true")
+
     fake_db = FakeSession(device=None)
     client = create_client(fake_db)
 
@@ -100,7 +107,9 @@ def test_test_notification_returns_404_when_no_android_device(monkeypatch):
 
 
 def test_test_notification_returns_502_when_delivery_fails(monkeypatch):
+    monkeypatch.setenv("SAFECIRCLE_ENV", "development")
     monkeypatch.setenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "true")
+
     fake_db = FakeSession(device=make_device())
     client = create_client(fake_db)
 
@@ -117,3 +126,15 @@ def test_test_notification_returns_502_when_delivery_fails(monkeypatch):
     assert response.status_code == 502
     assert response.json()["detail"] == "Test notification delivery failed"
 
+
+def test_test_notification_is_disabled_in_production(monkeypatch):
+    monkeypatch.setenv("SAFECIRCLE_ENV", "production")
+    monkeypatch.setenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "true")
+
+    fake_db = FakeSession(device=make_device())
+    client = create_client(fake_db)
+
+    response = client.post("/test-notifications/me")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Not found"
