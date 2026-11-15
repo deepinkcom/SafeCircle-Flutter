@@ -38,9 +38,7 @@ docker run --rm -p 8000:8000 \
 ```
 
 Do not commit credentials or environment files. The Docker build context excludes
-`.env` files. In Azure, mount the Firebase service-account JSON from a protected
-Container Apps secret as a read-only file and set
-`FIREBASE_SERVICE_ACCOUNT_PATH` to that mounted path. Prefer workload identity
+`.env` files. In Azure, supply the JSON document as a protected Container Apps secret and map it to `FIREBASE_SERVICE_ACCOUNT_JSON`. The backend now accepts this secret directly; local development can continue using `FIREBASE_SERVICE_ACCOUNT_PATH`. Prefer workload identity
 where the Firebase integration supports it; do not put private keys in Flutter,
 image layers, source control, or build logs.
 
@@ -48,7 +46,8 @@ image layers, source control, or build logs.
 
 - `DATABASE_URL`: SQLAlchemy PostgreSQL URL for the Azure database. Use TLS
   (Azure PostgreSQL connection string with `sslmode=require` or stricter).
-- `FIREBASE_SERVICE_ACCOUNT_PATH`: path to the mounted service-account JSON file.
+- `FIREBASE_SERVICE_ACCOUNT_PATH`: path to a mounted service-account JSON file (supported for local/container file mounts).
+- `FIREBASE_SERVICE_ACCOUNT_JSON`: service-account JSON supplied as a protected Container Apps secret. If set, this takes precedence over the file path. Never print this variable or include it in diagnostics.
 - `PORT`: optional HTTP listen port; defaults to 8000 in the image.
 
 The current settings class requires `DATABASE_URL`. Firebase authentication
@@ -176,3 +175,57 @@ The API exposes:
 The notification worker remains a separate long-running process. A healthy API
 readiness response does not prove the worker is running or that Firebase Cloud
 Messaging delivery succeeds; monitor the worker independently.
+
+## Azure infrastructure templates (not deployed)
+
+`infra/azure/container-apps.bicep` defines two Container Apps using an
+**existing** Container Apps managed environment and **existing** Azure Container
+Registry. It creates a user-assigned managed identity and grants it the ACR
+`AcrPull` role, then defines:
+- `safecircle-api`: external HTTPS ingress, port 8000, liveness and database
+  readiness probes, and a minimum replica count of at least one.
+- `safecircle-push-worker`: no ingress, explicit
+  `python -m app.push_worker` command, and exactly one replica so the polling
+  worker cannot scale to zero.
+
+The template accepts the database URL and Firebase service-account JSON as
+secure parameters and stores them as Container Apps secrets. It does not output
+secret values. The API and worker use secret references for their environment
+variables. The managed identity is used for image pulls; it does not currently
+provide passwordless PostgreSQL authentication.
+
+### Required prerequisites and deployment sequence
+
+The Container Apps template is intentionally not a one-click deployment. Before
+it can be used, an administrator must provision and approve:
+1. An Azure resource group and Container Apps managed environment.
+2. An Azure Container Registry and push the reviewed image tag to it.
+3. Azure Database for PostgreSQL Flexible Server, database, networking and
+   firewall/private DNS connectivity from the Container Apps environment.
+4. PostGIS extension and the reviewed baseline schema, followed by the approved
+   Alembic migration task.
+5. Firebase service-account secret and a verified non-production FCM test.
+
+The current template references the existing registry and managed environment;
+it does not create those resources or the PostgreSQL server. This separation
+prevents accidental resource creation and keeps infrastructure provisioning
+behind an explicit approval gate.
+
+### Build and validation
+
+CI compiles the Bicep template with Azure CLI. Compilation checks syntax and
+resource schema only; it does not prove the target subscription has permissions,
+that resource names are available, that quotas are sufficient, or that the
+network and database configuration is correct. Before any deployment, run
+`az deployment group what-if` against the explicitly approved resource group
+and review every proposed change.
+
+Example local validation (no Azure resources are created):
+
+```sh
+az bicep build --file infra/azure/container-apps.bicep
+```
+
+Do not run `az deployment group create`, `az containerapp update`,
+`az acr build`, or database bootstrap/migration commands without separate
+explicit approval.
