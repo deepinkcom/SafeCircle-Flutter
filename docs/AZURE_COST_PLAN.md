@@ -1,7 +1,8 @@
 # SafeCircle Azure cost plan — temporary assessment/demo environment
 
 Status: planning only. The owner selected **South Africa North** and a
-short-lived, lowest-practical-cost environment for the academic marking/demo.
+short-lived, lowest-practical-cost environment for the academic marking/demo,
+with an expected lifetime of **one month (30 days)**.
 This is not a production design or a live Azure quote. No resources are created.
 
 ## Confirmed planning decisions
@@ -10,9 +11,9 @@ This is not a production design or a live Azure quote. No resources are created.
 - Purpose: temporary environment for assessment, marking and demonstrations.
 - Priority: minimise recurring spend; do not pay for production-grade redundancy
   that is not needed for a short-lived demonstration.
-- Lifecycle: create only after explicit provisioning approval; delete the
-  resource group after marking and after any required evidence/data has been
-  exported and retained safely.
+- Lifecycle: budget for up to 30 days; create only after explicit provisioning
+  approval; delete the resource group at the end of the assessment month after
+  required evidence/data has been exported and retained safely.
 - Budget: no numeric monthly ceiling has been supplied yet. Do not deploy until
   the Azure Pricing Calculator estimate and expected active days are reviewed.
 
@@ -62,6 +63,22 @@ cheapest safe operational approach may be to:
 Do not assume all services can be paused at zero cost. PostgreSQL storage,
 backup retention, ACR storage, Log Analytics, DNS, public IPs, NAT gateways and
 private endpoints may continue to incur charges while compute is stopped.
+
+## One-month operating assumptions
+
+The planning horizon is 30 days. Until the owner confirms a daily demonstration
+schedule, prepare two calculator cases:
+
+- **Continuous availability (upper planning case):** API and worker run 24
+  hours/day for 30 days (720 hours); PostgreSQL runs 24 hours/day for 30 days.
+- **Assessment-window operation (cost-saving case):** API, worker and database
+  run only during agreed demonstration/preparation windows. Record the exact
+  hours/day and number of days. Stopping compute does not eliminate storage,
+  backup, registry, monitoring or networking charges.
+
+For both cases, include 30 days of database storage and any applicable backup
+retention, and include the full month of any always-on supporting services.
+Use the continuous case as the conservative budget until a schedule is agreed.
 
 ## Cost estimate still required
 
