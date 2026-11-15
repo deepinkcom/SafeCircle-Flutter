@@ -1,75 +1,112 @@
-# SafeCircle Azure cost-planning worksheet
+# SafeCircle Azure cost plan — temporary assessment/demo environment
 
-Status: planning only. No Azure resources are created by this worksheet. Prices
-are intentionally not hard-coded: Azure pricing varies by region, currency,
-subscription offer, SKU, usage and date. Obtain a live quote from the Azure
-Pricing Calculator for the intended subscription and region before approval.
+Status: planning only. The owner selected **South Africa North** and a
+short-lived, lowest-practical-cost environment for the academic marking/demo.
+This is not a production design or a live Azure quote. No resources are created.
 
-## Candidate region
+## Confirmed planning decisions
 
-Initial planning region: South Africa North, subject to checking availability
-for each required service and SKU. Do not assume all Container Apps, PostgreSQL,
-ACR networking, zone-redundancy or private-link features are available in that
-region. If a service is unavailable, compare another approved region and assess
-data residency, latency, regulatory and cross-region data-transfer implications.
+- Region: **South Africa North** (`southafricanorth`, Johannesburg).
+- Purpose: temporary environment for assessment, marking and demonstrations.
+- Priority: minimise recurring spend; do not pay for production-grade redundancy
+  that is not needed for a short-lived demonstration.
+- Lifecycle: create only after explicit provisioning approval; delete the
+  resource group after marking and after any required evidence/data has been
+  exported and retained safely.
+- Budget: no numeric monthly ceiling has been supplied yet. Do not deploy until
+  the Azure Pricing Calculator estimate and expected active days are reviewed.
 
-## Cost components to quote
+Microsoft lists South Africa North as an Azure region with three availability
+zones. PostgreSQL Flexible Server is listed for South Africa North, including
+Burstable compute and HA/backup feature availability. This does not guarantee
+that every specific SKU, Container Apps environment mode, or quota is available
+for this subscription at deployment time. Verify the actual region/SKU choices
+in the subscription before provisioning.
+Sources:
+- https://learn.microsoft.com/en-us/azure/reliability/regions-list
+- https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/overview
 
-| Component | Planning configuration | Cost driver / decision |
+## Lowest-practical-cost temporary configuration
+
+| Service | Temporary starting choice | Cost control / limitation |
 |---|---|---|
-| Container Apps environment | Workload profiles / consumption mode to be selected | API and worker vCPU-seconds, GiB-seconds, replicas, environment/networking |
-| SafeCircle API | 0.5 vCPU, 1 GiB starting template; minimum 1 replica | Always-on baseline plus peak scale-out |
-| Push worker | 0.5 vCPU, 1 GiB starting template; exactly 1 replica | Continuous polling means continuous compute |
-| PostgreSQL Flexible Server | Burstable B1ms and 32 GiB are template defaults only | Server uptime, compute SKU, provisioned storage, backup overage, HA |
-| Container Registry | Basic by default | Registry storage, transactions, selected SKU |
-| Private networking | VNet, private DNS; optional NAT/private endpoints | NAT gateway hourly/data processing, private endpoint hourly/data, DNS, egress |
-| Monitoring | Azure Monitor / Log Analytics | Ingestion volume, retention and alerting |
-| Data transfer | Client traffic, push integrations, cross-region dependencies | Outbound bandwidth and cross-region traffic |
+| Resource group | One dedicated assessment resource group in South Africa North | Delete the group after marking once evidence/data is safely retained |
+| Container Apps | Consumption plan; no dedicated workload profile | Avoids paying for a dedicated workload profile |
+| FastAPI API | 0.5 vCPU / 1 GiB starting allocation; one replica while demo is active | Keep one replica for reliable live demonstration; scale to zero only when not required and after confirming wake-up delay is acceptable |
+| Push worker | 0.25-0.5 vCPU / 0.5-1 GiB; one replica only when push notifications are part of the demonstration | Polling worker incurs compute while running; stop/delete the temporary environment outside assessment windows if no alerts are needed |
+| PostgreSQL Flexible Server | Burstable B1ms if available and sufficient; 32 GiB minimum/template starting storage | Stop the server between demo periods where operationally practical; compute billing stops while stopped, but storage/backup charges can remain; server auto-start behaviour and stop limits must be checked |
+| PostgreSQL HA | Disabled | Accepts a single-zone outage risk for a temporary demo; not suitable as a production recommendation |
+| Backup | Minimum supported retention (currently template default 7 days) | Export a separate logical backup before deletion; verify restore if data must be retained |
+| ACR | Basic SKU; admin user disabled | No private endpoint; use managed identity for pulls; delete registry after marking if image is safely retained elsewhere |
+| Logs | Minimal diagnostic categories and short retention | Avoid high-volume request/body logging; never log secrets, tokens or location details |
+| Networking | Keep the deployment simple, but preserve TLS and restrict database access | Private VNet architecture is preferred for production but may add complexity/cost. For a temporary assessment deployment, compare private networking with a tightly restricted public-access design before approval; never expose PostgreSQL broadly to the internet |
 
-## Required calculator scenarios
+Important: do not reduce security by disabling HTTPS, committing secrets,
+enabling the ACR admin account, or opening PostgreSQL to all IP addresses.
+Cost optimisation must not expose Firebase credentials, user data, or emergency
+location information.
 
-Prepare at least these three scenarios in the Azure Pricing Calculator:
+## Active-use schedule
 
-1. **Development / demonstration**: one API replica, one worker replica,
-   smallest supported non-production database SKU, short log retention. This
-   is not suitable for emergency-service production.
-2. **Pilot**: one always-on API replica, one always-on worker, production-like
-   database storage and backup retention, monitoring and alerting.
-3. **Production**: API redundancy and scale-out, database HA where supported,
-   restore testing, longer backup retention, private networking, monitoring,
-   and a documented disaster-recovery target.
+Estimate the number of hours/days the environment is actually needed. The
+cheapest safe operational approach may be to:
+1. Build and test the image in GitHub Actions without pushing to Azure.
+2. Provision the temporary Azure environment shortly before the assessment.
+3. Run the API, database and worker only for the agreed demo window.
+4. Stop PostgreSQL and scale/stop app workloads when not in use, if the chosen
+   configuration supports this without losing readiness or demo reliability.
+5. Export required screenshots, logs with sensitive fields redacted, and a
+   database backup if needed.
+6. Delete the temporary resource group after marking and retention approval.
 
-For each scenario record:
-- Region and currency.
-- SKU, replica count, hours/month, storage and backup assumptions.
-- Monthly estimated subtotal by service.
-- Data transfer and monitoring assumptions.
-- Tax, support plan and any discounts separately.
-- Calculator estimate date and URL/export.
+Do not assume all services can be paused at zero cost. PostgreSQL storage,
+backup retention, ACR storage, Log Analytics, DNS, public IPs, NAT gateways and
+private endpoints may continue to incur charges while compute is stopped.
 
-## Availability and cost trade-offs
+## Cost estimate still required
 
-- The API and polling worker currently have minimum replica counts of one.
-  Scaling either to zero may reduce cost but is not recommended for this
-  emergency-response use case without a tested alternative architecture.
-- The PostgreSQL Bicep template currently disables high availability and
-  geo-redundant backup. Production approval must explicitly decide whether
-  those settings meet the application's recovery objectives.
-- Premium ACR is needed for the private-endpoint pattern. Basic ACR is cheaper
-  but the current template leaves public registry access enabled by default.
-- Private networking can add fixed costs (for example NAT gateway or private
-  endpoints) and operational complexity. Validate whether the selected
-  Container Apps networking mode can reach the delegated PostgreSQL subnet and
-  registry private endpoint before choosing a topology.
+No fixed Rand amount is quoted here because current South Africa North prices
+depend on subscription offer, currency, tax, exact SKU, active hours, storage,
+backup, log ingestion and outbound data. Before deployment, enter the following
+into the Azure Pricing Calculator and save/export the estimate:
+
+- Region: South Africa North.
+- Container Apps Consumption: API + worker replica count, vCPU/memory and
+  actual active hours.
+- PostgreSQL Flexible Server: Burstable B1ms (or lowest currently available
+  suitable SKU), 32 GiB storage, 7-day backup, active hours and stop periods.
+- ACR Basic: one registry, expected image storage and retention.
+- Monitoring: minimal ingestion and short retention.
+- Networking: quote the selected private or restricted-public design, including
+  any NAT gateway, private endpoints and DNS charges.
+- Currency: ZAR if supported by the subscription/calculator; otherwise record
+  the calculator currency and conversion date separately.
+
+Calculator: https://azure.microsoft.com/pricing/calculator/
+
+## South Africa North availability caveat
+
+South Africa North is the selected target region. Before provisioning, verify
+for the actual subscription:
+- Container Apps availability and selected Consumption plan in the region.
+- PostgreSQL Flexible Server Burstable SKU and PostGIS extension support.
+- ACR Basic availability.
+- Required Container Apps VNet integration/subnet requirements if choosing
+  private PostgreSQL networking.
+- Quotas and regional capacity.
+
+If a required service/SKU is unavailable, stop and ask the owner before
+proposing another region. South Africa West is not an automatic fallback.
 
 ## Approval gate
 
-Do not provision anything until the project owner has approved:
-1. The region and data residency.
-2. Development, pilot or production sizing.
-3. A monthly budget and alert threshold.
-4. HA, backup retention and recovery objectives.
-5. Network design and public/private exposure.
-6. A resource-by-resource Azure Pricing Calculator estimate.
+Before any resource is created, obtain explicit approval for:
+1. The calculator estimate and numeric maximum spend in ZAR (or documented
+   subscription currency).
+2. The planned active dates/hours.
+3. Whether the demo needs real Firebase push delivery or only API/database
+   demonstration.
+4. Public-restricted vs private PostgreSQL networking.
+5. Data retention/export and resource-group deletion date.
 
-No prices in this document are a quote or promise of availability.
+No Azure resources are created by this document. No prices here are a quote.
