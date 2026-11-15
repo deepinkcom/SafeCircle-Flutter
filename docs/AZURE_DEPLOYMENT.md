@@ -317,3 +317,27 @@ See `docs/AZURE_COST_PLAN.md` for development, pilot and production scenarios,
 the services to include in the Azure Pricing Calculator, and the approval gates.
 No prices are embedded because pricing and service availability vary by region,
 subscription and date.
+
+## Temporary assessment deployment decision
+
+The selected target region is **South Africa North** (`southafricanorth`,
+Johannesburg). The initial deployment is intended only for the academic
+assessment/marking period and must be cost-optimised, not treated as a
+production-ready emergency service.
+
+Create the dedicated resource group in South Africa North so templates that
+default to `resourceGroup().location` inherit the selected region. Verify
+service/SKU availability and quota in the actual subscription before any
+deployment. Do not silently switch to South Africa West or another region.
+
+Use `docs/AZURE_COST_PLAN.md` as the temporary environment plan. It requires a
+current Azure Pricing Calculator estimate and an owner-approved maximum spend
+before provisioning. Consider a short active window, stopping PostgreSQL
+between demo periods, minimal log retention and deleting the temporary resource
+group after required evidence and data have been exported.
+
+The temporary setup is for controlled assessment demonstrations only. Do not
+use it to handle real emergencies or sensitive live-user location data. It has
+no database HA and no production disaster-recovery guarantee. HTTPS, least
+privilege, restricted database access and secret protection remain mandatory
+even for a temporary environment.
