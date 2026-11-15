@@ -61,14 +61,22 @@ The current migration chain does **not** create a complete empty SafeCircle
 database. Its root revision
 `2549fa7ab98a_add_emergency_contact_links.py` creates
 `emergency_contact_links` with foreign keys to an existing `users` table.
-Later migrations also alter existing `devices` and `alerts` tables. There is
-no baseline migration in the inspected migration chain that creates all of the
-pre-existing core tables.
+Later migrations also alter existing `devices` and `alerts` tables.
 
-Therefore, do not point Alembic at a newly created empty production database
-until the authoritative baseline schema / database bootstrap procedure has
-been identified and reviewed. Do not use `alembic stamp head` to bypass this
-requirement.
+A reviewed legacy baseline matching the isolated PostgreSQL integration fixture
+is now recorded in `backend/scripts/bootstrap_postgres.sql`. It creates the
+pre-existing `users`, `emergency_contacts`, `devices`, `alerts`, and
+`alert_acknowledgements` tables and enables PostGIS. This is a one-time
+bootstrap for a **brand-new empty database only**, not an Alembic revision and
+not a script to run against an existing database.
+
+For a new Azure database, first confirm the server supports PostGIS and that the
+deployment identity is permitted to create the extension. Review the SQL, take
+a backup where applicable, then execute the baseline once against the empty
+target database. Only after it succeeds should the approved release process run
+`alembic upgrade head`. Never use `alembic stamp head` to bypass missing
+schema creation. Existing installations must be assessed against their actual
+schema and migration version; do not re-run the baseline.
 
 Before applying the existing migrations to an approved database:
 
@@ -84,18 +92,23 @@ Before applying the existing migrations to an approved database:
 7. Verify `alembic current`, application reads/writes, spatial queries, and
    notification worker behavior.
 
-The repository's current test fixture forces SQLite for the default backend
-test suite. Tests named for PostgreSQL exercise real PostgreSQL-specific
-behavior only when a suitable PostgreSQL test database is explicitly supplied.
-A green SQLite test run is not proof that PostGIS migrations or PostgreSQL
-locking/concurrency behavior works in Azure.
+The repository's default test fixture forces SQLite so ordinary backend tests cannot
+inherit a developer database URL. CI now has a separate disposable PostGIS
+service job that explicitly enables
+`tests/test_emergency_notification_postgres.py`. This exercises the migration
+chain and PostgreSQL-specific emergency-event locking/recovery behavior against
+PostGIS. It is still not a substitute for a staging Azure database rehearsal,
+network/TLS checks, backup restoration, or production-like load tests.
 
 ## Container Apps configuration guidance
 
 API:
 - Ingress: external HTTPS; target port 8000.
-- Liveness/readiness initial probe path: `/health` (currently a basic process
-  health response, not a database readiness check).
+- Liveness probe: `/health` confirms the API process can serve requests.
+- Readiness probe: `/health/ready` runs `SELECT 1` and returns HTTP 503 if the
+  database is unavailable. Configure Container Apps readiness probes against
+  this path; do not use it as liveness, or a database outage could restart-loop
+  otherwise healthy API processes.
 - Configure minimum replicas based on availability requirements.
 - Set resource requests/limits after load testing.
 
@@ -148,3 +161,18 @@ ACR, provision resources, run migrations, or deploy.
   environment.
 - Add Azure deployment automation only after CI passes and separate approval
   is granted for Azure credentials and deployment scope.
+
+## CI and health verification
+
+The CI workflow now includes a separate PostgreSQL/PostGIS integration job
+using a disposable PostGIS container and synthetic credentials. It does not
+connect to Azure or any developer database.
+
+The API exposes:
+- `GET /health`: process liveness; deliberately does not query PostgreSQL.
+- `GET /health/ready`: database readiness; performs `SELECT 1` and returns
+  HTTP 503 when SQLAlchemy cannot reach the configured database.
+
+The notification worker remains a separate long-running process. A healthy API
+readiness response does not prove the worker is running or that Firebase Cloud
+Messaging delivery succeeds; monitor the worker independently.
