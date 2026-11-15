@@ -5,13 +5,13 @@ targetScope = 'resourceGroup'
 @maxLength(50)
 param registryName string
 
-@description('Registry SKU. Basic is suitable for initial development; choose Premium for private endpoints and zone redundancy.')
+@description('Standard is a candidate only if the Azure for Students 31-day free-service allowance is verified; otherwise select Basic after pricing review. Premium is required for private endpoints.')
 @allowed([
   'Basic'
   'Standard'
   'Premium'
 ])
-param registrySku string = 'Basic'
+param registrySku string = 'Standard'
 
 @description('Azure region; defaults to resource group location.')
 param location string = resourceGroup().location
@@ -34,7 +34,7 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
       }
       retentionPolicy: {
         days: 7
-        status: 'enabled'
+        status: 'disabled'
       }
       trustPolicy: {
         type: 'Notary'
