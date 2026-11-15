@@ -51,8 +51,8 @@ image layers, source control, or build logs.
 - `PORT`: optional HTTP listen port; defaults to 8000 in the image.
 
 The current settings class requires `DATABASE_URL`. Firebase authentication
-initialization requires a valid service-account file. Configure both before
-starting the API or worker.
+initialization accepts either `FIREBASE_SERVICE_ACCOUNT_JSON` or
+`FIREBASE_SERVICE_ACCOUNT_PATH`. Configure both before starting the API or worker.
 
 ## Database and migration gate — important
 
@@ -142,11 +142,14 @@ for development until that change is implemented and covered by tests. Never
 put database credentials or Firebase service-account private keys in
 `--dart-define`.
 
-## CI
+## CI and preflight
 
-`.github/workflows/ci.yml` runs backend tests, Flutter analysis/tests, and a
-local Docker image build. It deliberately does not log in to Azure, push to
-ACR, provision resources, run migrations, or deploy.
+`.github/workflows/ci.yml` runs backend tests, Flutter analysis/tests, a
+PostgreSQL/PostGIS integration job, a local Docker image build, and Bicep
+compilation. `.github/workflows/azure-preflight.yml` is a manually triggerable
+preflight workflow that compiles templates and builds the image locally. Neither
+workflow logs in to Azure, pushes to ACR, provisions resources, runs migrations,
+or deploys.
 
 ## Outstanding release blockers
 
@@ -307,3 +310,10 @@ subscription quotas, guarantee regional SKU availability, or prove private
 network connectivity. A future deployment pipeline must use explicit environment
 protection/manual approvals, least-privilege identity, and a reviewed
 `what-if` result before any resource creation.
+
+## Cost planning
+
+See `docs/AZURE_COST_PLAN.md` for development, pilot and production scenarios,
+the services to include in the Azure Pricing Calculator, and the approval gates.
+No prices are embedded because pricing and service availability vary by region,
+subscription and date.
