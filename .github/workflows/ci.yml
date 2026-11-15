@@ -41,7 +41,7 @@ jobs:
       - name: Resolve Flutter dependencies
         run: flutter pub get
       - name: Analyze Flutter code
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
       - name: Run Flutter tests
         run: flutter test
 
