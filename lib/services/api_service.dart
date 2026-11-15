@@ -15,7 +15,10 @@ class ApiService {
   /// closed per request, so existing callers need no new disposal lifecycle.
   /// Production authentication continues to use the current Firebase user.
   ApiService({
-    this.baseUrl = 'http://192.168.0.28:8000',
+    this.baseUrl = const String.fromEnvironment(
+      'SAFECIRCLE_API_BASE_URL',
+      defaultValue: 'http://192.168.0.28:8000',
+    ),
     http.Client? client,
     Future<String?> Function()? tokenProvider,
     this.requestTimeout = const Duration(seconds: 20),
