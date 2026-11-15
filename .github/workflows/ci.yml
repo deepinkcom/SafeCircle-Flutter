@@ -29,6 +29,45 @@ jobs:
       - name: Run backend tests
         run: python -m pytest -q
 
+  postgres-integration:
+    name: PostgreSQL and PostGIS integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: safecircle_pr4_test
+          POSTGRES_USER: safecircle_pr4_test
+          POSTGRES_PASSWORD: ci-only-synthetic-password
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U safecircle_pr4_test -d safecircle_pr4_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SAFECIRCLE_PR4_PG_TEST: "1"
+      SAFECIRCLE_PR4_PG_HOST: 127.0.0.1
+      SAFECIRCLE_PR4_PG_PORT: "55432"
+      SAFECIRCLE_PR4_PG_USER: safecircle_pr4_test
+      SAFECIRCLE_PR4_PG_DATABASE: safecircle_pr4_test
+      SAFECIRCLE_PR4_PG_PASSWORD: ci-only-synthetic-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-test.txt
+      - name: Install backend test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - name: Run isolated PostgreSQL/PostGIS integration tests
+        run: python -m pytest -q tests/test_emergency_notification_postgres.py
+
   flutter-checks:
     name: Flutter analyze and tests
     runs-on: ubuntu-latest
