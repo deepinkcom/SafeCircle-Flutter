@@ -8,7 +8,7 @@ from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, select, text
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, inspect, insert, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.models import EmergencyContact, EmergencyContactLink, Notification, User
@@ -18,6 +18,7 @@ from test_contact_links_migration import insert_link, migration_db, snapshot
 REVISION = "b6e9c2d4f810"
 PARENT = "8c2f7d1a6b90"
 SCHEMA_HEAD = "d9a4f6b2c730"
+CURRENT_HEAD = "e17d6a10bc25"
 
 
 def notification(**changes):
@@ -29,10 +30,28 @@ def test_real_head_upgrade_preserves_all_existing_data_and_does_not_backfill(mig
     engine, config = migration_db
     insert_link(engine)
     before = {model: snapshot(engine, model.__table__) for model in (User, EmergencyContact, EmergencyContactLink)}
+    alert_table = Table(
+        "alerts", MetaData(),
+        Column("id", Integer, primary_key=True),
+        Column("user_id", Integer, nullable=False),
+        Column("kind", String(50), nullable=False),
+        Column("status", String(50), nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+    )
+    alert_table.create(engine)
+    with engine.begin() as connection:
+        connection.execute(insert(alert_table).values(
+            id=21, user_id=1, kind="panic", status="resolved",
+            created_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        ))
     command.upgrade(config, "head")
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == SCHEMA_HEAD
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_HEAD
         assert connection.execute(select(Notification)).all() == []
+        assert connection.execute(text(
+            "SELECT id, user_id, kind, status, notification_events_status "
+            "FROM alerts WHERE id=21"
+        )).one() == (21, 1, "panic", "resolved", "complete")
     for model, rows in before.items():
         assert snapshot(engine, model.__table__) == rows
     inspector = inspect(engine)
@@ -106,7 +125,7 @@ def test_explicit_notification_downgrade_only_drops_new_table(migration_db):
 def test_postgresql_ddl_and_revision_chain_without_server_connection(migration_db):
     _, config = migration_db
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [SCHEMA_HEAD]
+    assert script.get_heads() == [CURRENT_HEAD]
     revision = script.get_revision(REVISION)
     assert revision.down_revision == PARENT
     output = StringIO()

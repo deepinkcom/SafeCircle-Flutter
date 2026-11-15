@@ -2,11 +2,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from firebase_admin import messaging
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
-from app.models import Device, EmergencyContactLink, Notification, PushDelivery
-from app.push_worker import deliver_one
+from app.models import Alert, Device, EmergencyContactLink, Notification, PushDelivery
+from app.push_worker import _claim, _deliver_claim, deliver_one
 from test_contact_links import client, database, headers, invite, respond
 from test_notifications import inbox, get_page, events
 
@@ -98,15 +98,25 @@ def test_unregistered_token_removes_device_without_deleting_inbox(inbox,database
 
 
 def test_emergency_delivery_worker_sends_owned_jobs(inbox, database):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
     device(database, 2, 'synthetic-emergency-device')
     calls = []
 
     with Session(database) as db:
+        alert = Alert(
+            user_id=1,
+            kind="panic",
+            status="active",
+            notification_events_status="complete",
+        )
+        db.add(alert)
+        db.flush()
         notice = Notification(
             recipient_user_id=2,
             category='emergency',
-            event_type='emergency.synthetic',
-            source_id=7,
+            event_type='emergency.panic',
+            source_id=alert.id,
             title='Emergency alert',
             message='A contact needs help.',
         )
@@ -135,6 +145,169 @@ def test_emergency_delivery_worker_sends_owned_jobs(inbox, database):
     assert calls == [
         ('synthetic-emergency-device', notice_id, 'synthetic-uid-2')
     ]
+
+
+def test_emergency_delivery_locks_authorization_before_device(inbox, database):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
+    device(database, 2, "synthetic-lock-order-device")
+    statements = []
+
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().lower().startswith("select"):
+            statements.append(" ".join(statement.lower().split()))
+
+    event.listen(database, "before_cursor_execute", capture)
+    try:
+        now = datetime.now(timezone.utc)
+        with Session(database) as db:
+            alert = Alert(
+                user_id=1,
+                kind="panic",
+                status="active",
+                notification_events_status="complete",
+            )
+            db.add(alert)
+            db.flush()
+            notice = Notification(
+                recipient_user_id=2,
+                category="emergency",
+                event_type="emergency.panic",
+                source_id=alert.id,
+                title="Emergency alert",
+                message="Safe synthetic notification.",
+            )
+            db.add(notice)
+            db.flush()
+            db.add(PushDelivery(
+                notification_id=notice.id,
+                device_id=db.scalar(select(Device.id).where(Device.user_id == 2)),
+                next_attempt_at=now,
+            ))
+            db.flush()
+            lease = _claim(db, now)
+            assert lease is not None and lease is not True
+            statements.clear()
+
+        with Session(database) as db:
+            assert _deliver_claim(db, lease, lambda *_args: None, now)
+    finally:
+        event.remove(database, "before_cursor_execute", capture)
+
+    alert_index = next(i for i, sql in enumerate(statements) if "from alerts" in sql)
+    link_index = next(
+        i for i, sql in enumerate(statements) if "from emergency_contact_links" in sql
+    )
+    device_index = next(i for i, sql in enumerate(statements) if "from devices" in sql)
+    assert alert_index < link_index < device_index
+
+
+@pytest.mark.parametrize("stale_reason", ["resolved", "revoked"])
+def test_emergency_worker_cancels_stale_or_unauthorized_jobs(
+    inbox, database, stale_reason
+):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
+    device(database, 2, f"synthetic-stale-{stale_reason}")
+    with Session(database) as db:
+        alert = Alert(
+            user_id=1,
+            kind="panic",
+            status="active",
+            notification_events_status="complete",
+        )
+        db.add(alert)
+        db.flush()
+        notice = Notification(
+            recipient_user_id=2,
+            category="emergency",
+            event_type="emergency.panic",
+            source_id=alert.id,
+            title="Emergency alert",
+            message="Safe synthetic notification.",
+        )
+        db.add(notice)
+        db.flush()
+        job = PushDelivery(
+            notification_id=notice.id,
+            device_id=db.scalar(select(Device.id).where(Device.user_id == 2)),
+        )
+        db.add(job)
+        db.flush()
+        alert_id, job_id = alert.id, job.id
+        db.commit()
+
+    if stale_reason == "resolved":
+        with Session(database) as db:
+            db.get(Alert, alert_id).status = "resolved"
+            db.commit()
+    else:
+        assert inbox.delete(
+            f"/contact-links/{link['id']}", headers=headers(1)
+        ).status_code == 200
+
+    calls = []
+    with Session(database) as db:
+        assert deliver_one(
+            db,
+            lambda *args: calls.append(args),
+        )
+        assert db.get(PushDelivery, job_id).status == "cancelled"
+    assert calls == []
+
+
+@pytest.mark.parametrize("stale_reason", ["resolved", "revoked"])
+def test_emergency_worker_rechecks_policy_after_job_claim(
+    inbox, database, stale_reason
+):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
+    device(database, 2, f"synthetic-claimed-{stale_reason}")
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        alert = Alert(
+            user_id=1,
+            kind="panic",
+            status="active",
+            notification_events_status="complete",
+        )
+        db.add(alert)
+        db.flush()
+        notice = Notification(
+            recipient_user_id=2,
+            category="emergency",
+            event_type="emergency.panic",
+            source_id=alert.id,
+            title="Emergency alert",
+            message="Safe synthetic notification.",
+        )
+        db.add(notice)
+        db.flush()
+        job = PushDelivery(
+            notification_id=notice.id,
+            device_id=db.scalar(select(Device.id).where(Device.user_id == 2)),
+            next_attempt_at=now,
+        )
+        db.add(job)
+        db.flush()
+        alert_id, job_id = alert.id, job.id
+        lease = _claim(db, now)
+        assert lease is not None and lease is not True
+
+    if stale_reason == "resolved":
+        with Session(database) as db:
+            db.get(Alert, alert_id).status = "resolved"
+            db.commit()
+    else:
+        assert inbox.delete(
+            f"/contact-links/{link['id']}", headers=headers(1)
+        ).status_code == 200
+
+    calls = []
+    with Session(database) as db:
+        assert _deliver_claim(db, lease, lambda *args: calls.append(args), now)
+        assert db.get(PushDelivery, job_id).status == "cancelled"
+    assert calls == []
 
 
 def test_push_job_insert_failure_rolls_back_relationship_and_notification(inbox, database):

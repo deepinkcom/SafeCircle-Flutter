@@ -1,6 +1,7 @@
 """Persistent connection events. Never commits, sends push, or invents history."""
 
 from datetime import datetime
+import logging
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ CONNECTION_COPY = {
     "connection.rejected": ("Invitation rejected", "Your SafeCircle connection invitation was rejected."),
     "connection.revoked": ("Connection ended", "A SafeCircle invitation or connection involving you was revoked."),
 }
+
+logger = logging.getLogger(__name__)
 
 
 def record_connection_event(
@@ -136,3 +139,38 @@ def record_emergency_alert_events(
 
     return created_count
 
+
+def recover_one_pending_emergency_event(db: Session) -> bool:
+    """Idempotently recover one saved panic alert whose event transaction failed."""
+    alert = db.scalar(
+        select(Alert)
+        .where(Alert.notification_events_status == "pending")
+        .order_by(Alert.id)
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    )
+    if alert is None:
+        db.rollback()
+        return False
+
+    alert_id = alert.id
+    try:
+        created_count = record_emergency_alert_events(
+            db,
+            alert=alert,
+            created_at=alert.created_at,
+        )
+        alert.notification_events_status = "complete"
+        db.commit()
+        logger.info(
+            "panic_notification_event_recovered",
+            extra={"alert_id": alert_id, "notification_count": created_count},
+        )
+        return True
+    except Exception as error:
+        db.rollback()
+        logger.error(
+            "panic_notification_event_recovery_failed",
+            extra={"alert_id": alert_id, "exception_type": type(error).__name__},
+        )
+        return False

@@ -36,10 +36,12 @@ class AlertStore:
             created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
         self.ack = None
+        self.accepted_link = None
         self.added = []
         self.commits = 0
         self.nearby_sql = None
         self.nearby_params = None
+        self.scalar_queries = []
 
     def add(self, obj):
         assert isinstance(obj, (Alert, AlertAcknowledgement))
@@ -57,22 +59,28 @@ class AlertStore:
         pass
 
     def scalar(self, statement):
+        self.scalar_queries.append(statement)
         entity = statement.column_descriptions[0]["entity"]
         params = statement.compile().params
 
         if entity is AlertAcknowledgement:
             return self.ack
 
+        if entity is EmergencyContactLink:
+            return self.accepted_link
+
         assert entity is Alert
 
         if params.get("id_1") != self.alert.id:
             return None
 
-        if (
-            "user_id_1" in params
-            and params["user_id_1"] != self.alert.user_id
-        ):
-            return None
+        if "user_id_1" in params:
+            actor_id = params["user_id_1"]
+            if "alerts.user_id !=" in str(statement):
+                if actor_id == self.alert.user_id:
+                    return None
+            elif actor_id != self.alert.user_id:
+                return None
 
         if (
             "status_1" in params
@@ -176,6 +184,7 @@ def test_resolution_remains_owner_only_and_does_not_add_notifications(emergency)
 
 def test_acknowledgement_remains_separate_and_history_is_real_activity(emergency):
     client, store = emergency
+    store.accepted_link = 1
 
     assert client.get("/alerts/history").json() == []
 
@@ -183,6 +192,14 @@ def test_acknowledgement_remains_separate_and_history_is_real_activity(emergency
 
     assert response.status_code == 200
     assert response.json()["status"] == "on_my_way"
+    locked_sql = [
+        str(statement.compile(dialect=postgresql.dialect()))
+        for statement in store.scalar_queries
+        if "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect()))
+    ]
+    assert len(locked_sql) == 2
+    assert "FROM alerts" in locked_sql[0]
+    assert "emergency_contact_links" in locked_sql[1]
     assert len(store.added) == 1
     assert isinstance(store.added[0], AlertAcknowledgement)
 

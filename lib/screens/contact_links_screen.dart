@@ -115,6 +115,35 @@ class _ContactLinksScreenState extends State<ContactLinksScreen>
     }
   }
 
+  Future<void> _accept(ContactLink link, String? owner) async {
+    if (_confirming || owner == null || owner != _state.userId) return;
+    final session = _state.sessionVersion;
+    _confirming = true;
+    try {
+      final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+                title: const Text('Accept emergency connection?'),
+                content: const Text(
+                    'By accepting, each of you may receive an in-app notification and a push on registered devices when the other triggers a panic alert, while this connection remains accepted. Device notification permission must be enabled. You can revoke the connection later.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('Not now')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('Accept connection')),
+                ],
+              ));
+      if (mounted && confirmed == true && session == _state.sessionVersion) {
+        await _perform(() => _state.acceptInvitation(link.id),
+            'Invitation accepted.', owner);
+      }
+    } finally {
+      _confirming = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ContactLinksState>();
@@ -176,7 +205,7 @@ class _ContactLinksScreenState extends State<ContactLinksScreen>
                                   label: const Text('Invite by email')),
                               const SizedBox(height: 12),
                               const Text(
-                                  'Connections are not included in emergency alerts yet. Your phone contacts remain separate.'),
+                                  'While a connection is accepted, both people may receive an in-app notification and a push on registered devices when either triggers a panic alert. Device permissions and registration are required for push delivery. These connections do not change your separate phone-contact list.'),
                               const SizedBox(height: 12),
                               if (state.isAccessBlocked)
                                 ContactLinksAccessPanel(
@@ -229,11 +258,8 @@ class _ContactLinksScreenState extends State<ContactLinksScreen>
     } else if (_view == 1 && link.status == ContactLinkStatus.pending) {
       actions.addAll([
         FilledButton(
-            onPressed: enabled
-                ? () => _perform(() => state.acceptInvitation(link.id),
-                    'Invitation accepted.', owner)
-                : null,
-            child: const Text('Accept invitation')),
+            onPressed: enabled ? () => _accept(link, owner) : null,
+            child: const Text('Review and accept')),
         OutlinedButton(
             onPressed: enabled
                 ? () => _perform(() => state.rejectInvitation(link.id),

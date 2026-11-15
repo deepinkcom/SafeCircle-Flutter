@@ -78,7 +78,8 @@ class AppState extends ChangeNotifier {
     _photoLoading = false;
     _photoProgress = null;
     _photoNeedsRefresh = true;
-    _photoError = 'The photo session changed. Close the editor and refresh after signing in.';
+    _photoError =
+        'The photo session changed. Close the editor and refresh after signing in.';
     notifyListeners();
   }
 
@@ -108,8 +109,10 @@ class AppState extends ChangeNotifier {
     final uid = userProfile.uid;
     final generation = _authGeneration;
     final version = ++_photoVersion;
-    bool current() => _currentAuthentication(generation) &&
-        uid == userProfile.uid && version == _photoVersion;
+    bool current() =>
+        _currentAuthentication(generation) &&
+        uid == userProfile.uid &&
+        version == _photoVersion;
     _photoLoading = true;
     _photoError = null;
     notifyListeners();
@@ -124,14 +127,16 @@ class AppState extends ChangeNotifier {
         _discardPhotoBytes();
         _photoBytes = result.bytes;
       }
-      _userProfile = userProfile.copyWith(photoStoragePath: result.path, clearPhoto: result.path == null);
+      _userProfile = userProfile.copyWith(
+          photoStoragePath: result.path, clearPhoto: result.path == null);
       _photoNeedsRefresh = false; // Metadata was read from the server.
       _photoError = result.warning;
       return true;
     } catch (error) {
       if (current()) {
         _photoError = error is ProfilePhotoFailure
-            ? error.message : 'Your picture could not be loaded. Please retry.';
+            ? error.message
+            : 'Your picture could not be loaded. Please retry.';
       }
       return false;
     } finally {
@@ -142,24 +147,32 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<ProfilePhotoDraft?> selectProfilePhoto(ProfilePhotoSource source) async {
-    if (_disposed || !userProfile.isSignedIn || _photoBusy || _savingProfile) return null;
+  Future<ProfilePhotoDraft?> selectProfilePhoto(
+      ProfilePhotoSource source) async {
+    if (_disposed || !userProfile.isSignedIn || _photoBusy || _savingProfile) {
+      return null;
+    }
     final uid = userProfile.uid;
     final generation = _authGeneration;
-    bool current() => _currentAuthentication(generation) && uid == userProfile.uid;
+    bool current() =>
+        _currentAuthentication(generation) && uid == userProfile.uid;
     _photoBusy = true;
     _photoError = null;
     notifyListeners();
     try {
-      final draft = await _photos.pick(uid: uid, source: source, isCurrent: current);
+      final draft =
+          await _photos.pick(uid: uid, source: source, isCurrent: current);
       if (!current()) {
         draft?.dispose();
         return null;
       }
       return draft;
     } catch (error) {
-      if (current()) _photoError = error is ProfilePhotoFailure
-          ? error.message : 'Picture selection failed. Check access and try again.';
+      if (current()) {
+        _photoError = error is ProfilePhotoFailure
+            ? error.message
+            : 'Picture selection failed. Check access and try again.';
+      }
       return null;
     } finally {
       if (current()) {
@@ -169,32 +182,43 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<bool> saveProfilePhoto(ProfilePhotoDraft draft) => _changeProfilePhoto(draft);
+  Future<bool> saveProfilePhoto(ProfilePhotoDraft draft) =>
+      _changeProfilePhoto(draft);
   Future<bool> removeProfilePhoto() => _changeProfilePhoto(null);
 
   Future<bool> _changeProfilePhoto(ProfilePhotoDraft? draft) async {
-    if (_disposed || !userProfile.isSignedIn || _photoBusy || _savingProfile || _photoNeedsRefresh) {
+    if (_disposed ||
+        !userProfile.isSignedIn ||
+        _photoBusy ||
+        _savingProfile ||
+        _photoNeedsRefresh) {
       return false;
     }
     if (draft == null && userProfile.photoStoragePath == null) return false;
     final uid = userProfile.uid;
     final generation = _authGeneration;
     final version = ++_photoVersion;
-    bool current() => _currentAuthentication(generation) &&
-        uid == userProfile.uid && version == _photoVersion;
+    bool current() =>
+        _currentAuthentication(generation) &&
+        uid == userProfile.uid &&
+        version == _photoVersion;
     _photoBusy = true;
     _photoLoading = false;
     _photoError = null;
     _photoProgress = null;
     notifyListeners();
     try {
-      final result = await _photos.save(uid: uid, expectedPath: userProfile.photoStoragePath,
-        draft: draft, isCurrent: current, onProgress: (progress) {
-          if (current()) {
-            _photoProgress = progress;
-            notifyListeners();
-          }
-        });
+      final result = await _photos.save(
+          uid: uid,
+          expectedPath: userProfile.photoStoragePath,
+          draft: draft,
+          isCurrent: current,
+          onProgress: (progress) {
+            if (current()) {
+              _photoProgress = progress;
+              notifyListeners();
+            }
+          });
       if (!current()) {
         final staleBytes = result.bytes;
         if (staleBytes != null) staleBytes.fillRange(0, staleBytes.length, 0);
@@ -202,14 +226,17 @@ class AppState extends ChangeNotifier {
       }
       _discardPhotoBytes();
       _photoBytes = result.bytes;
-      _userProfile = userProfile.copyWith(photoStoragePath: result.path, clearPhoto: result.path == null);
+      _userProfile = userProfile.copyWith(
+          photoStoragePath: result.path, clearPhoto: result.path == null);
       _photoError = result.warning;
       return true;
     } catch (error) {
       if (current()) {
         _photoError = error is ProfilePhotoFailure
-            ? error.message : 'Your picture could not be updated. Refresh before trying again.';
-        _photoNeedsRefresh = error is! ProfilePhotoFailure || error.requiresRefresh;
+            ? error.message
+            : 'Your picture could not be updated. Refresh before trying again.';
+        _photoNeedsRefresh =
+            error is! ProfilePhotoFailure || error.requiresRefresh;
       }
       return false;
     } finally {
@@ -298,7 +325,9 @@ class AppState extends ChangeNotifier {
     }
     contactLinks.setSession(profile.uid);
     notifications.setSession(_userProfile.uid);
-    if (photoChanged && profile.isSignedIn && profile.photoStoragePath != null) {
+    if (photoChanged &&
+        profile.isSignedIn &&
+        profile.photoStoragePath != null) {
       unawaited(refreshProfilePhoto());
     }
   }
@@ -664,32 +693,35 @@ class AppState extends ChangeNotifier {
     return _currentAuthentication(generation) && accessible;
   }
 
-  /// Match the notification ID exactly; never substitute the nearest alert.
-  Future<NearbyPerson?> findNotificationNearbyAlert(int alertId) async {
+  /// Resolve the exact alert referenced by a recipient-owned notification.
+  /// The backend enforces ownership and current accepted-connection access.
+  Future<NearbyPerson?> findNotificationAlert(
+      int notificationId, int expectedAlertId) async {
     final generation = _authGeneration;
-    final position = await _location.getCurrentLocation();
-    if (!_currentAuthentication(generation)) return null;
-    final data = await _api.fetchNearbyAlerts(
-        latitude: position.lat, longitude: position.lng);
-    if (!_currentAuthentication(generation)) return null;
-    final row = data
-        .where((row) => row['id'] == alertId && row['status'] == 'active')
-        .firstOrNull;
-    if (row == null) return null;
-    final distance = row['distance_km'];
+    final Map<String, dynamic> row;
+    try {
+      row = await _api.fetchEmergencyAlertForNotification(notificationId);
+    } on ApiFailure catch (failure) {
+      if (failure.kind == ApiFailureKind.notFound ||
+          failure.statusCode == 410) {
+        return null;
+      }
+      rethrow;
+    }
+    if (!_currentAuthentication(generation) || row['id'] != expectedAlertId) {
+      return null;
+    }
     final lat = row['latitude'];
     final lng = row['longitude'];
-    if (distance is! num ||
-        !distance.isFinite ||
-        distance < 0 ||
-        lat is! num ||
-        lng is! num) {
+    final ownerUserId = row['owner_user_id'];
+    if (lat is! num || lng is! num || ownerUserId is! int || ownerUserId <= 0) {
       throw const ApiFailure(ApiFailureKind.invalidResponse);
     }
     final person = NearbyPerson(
-        id: alertId,
-        name: 'Emergency nearby',
-        distanceLabel: '$distance km away',
+        id: expectedAlertId,
+        ownerUserId: ownerUserId,
+        name: 'Emergency contact',
+        distanceLabel: 'SafeCircle connection',
         locationLabel: row['location_label']?.toString() ?? '',
         status: 'active',
         createdAt: DateTime.parse(row['created_at'].toString()),
@@ -854,6 +886,9 @@ class AppState extends ChangeNotifier {
 
       nearbyPerson = NearbyPerson(
         id: alert['id'] as int,
+        ownerUserId: alert['owner_user_id'] is int
+            ? alert['owner_user_id'] as int
+            : null,
         name: 'Emergency nearby',
         distanceLabel: '${alert['distance_km']} km away',
         locationLabel: alert['location_label']?.toString() ?? '',
@@ -886,8 +921,44 @@ class AppState extends ChangeNotifier {
 
     if (person == null) return;
 
+    final authGeneration = _authGeneration;
+    final ownerUid = userProfile.uid;
+    final relationshipSession = contactLinks.sessionVersion;
+    final backendUserId = _backendProfile?.id;
+    if (!userProfile.isSignedIn ||
+        backendUserId == null ||
+        !(_backendProfile?.profileReady ?? false) ||
+        contactLinks.userId != ownerUid ||
+        person.ownerUserId == null ||
+        person.ownerUserId == backendUserId) {
+      throw const ApiFailure(ApiFailureKind.forbidden);
+    }
+
+    final relationshipsLoaded = await contactLinks.loadAcceptedRelationships();
+    if (!_currentAuthentication(authGeneration) ||
+        notifications.sessionVersion != session ||
+        contactLinks.sessionVersion != relationshipSession ||
+        userProfile.uid != ownerUid) {
+      throw const ApiFailure(ApiFailureKind.authentication);
+    }
+    if (!relationshipsLoaded) {
+      throw contactLinks.accepted.error ??
+          const ApiFailure(ApiFailureKind.forbidden);
+    }
+    final isAcceptedContact = contactLinks.accepted.items.any(
+      (link) => link.isAccepted && link.otherUserId == person.ownerUserId,
+    );
+    if (!isAcceptedContact) {
+      throw const ApiFailure(ApiFailureKind.forbidden);
+    }
+
     final acknowledgement = await _api.acknowledgeAlert(person.id);
-    if (_disposed || session != notifications.sessionVersion) return;
+    if (!_currentAuthentication(authGeneration) ||
+        session != notifications.sessionVersion ||
+        relationshipSession != contactLinks.sessionVersion ||
+        userProfile.uid != ownerUid) {
+      return;
+    }
 
     alertHistory.insert(
       0,

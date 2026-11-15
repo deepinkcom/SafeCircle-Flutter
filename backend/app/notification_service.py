@@ -90,8 +90,17 @@ def firebase_notification_delivery(token, notification, recipient_uid):
     from firebase_admin import messaging
     from .auth import initialize_firebase
     initialize_firebase()
+    if (
+        getattr(notification, "category", None) == "emergency"
+        and getattr(notification, "event_type", None) == "emergency.panic"
+    ):
+        title = "SafeCircle emergency alert"
+        body = "An emergency contact has triggered a panic alert."
+    else:
+        title = "SafeCircle"
+        body = "You have a SafeCircle update."
     message = messaging.Message(
-        notification=messaging.Notification(title="SafeCircle", body="You have a SafeCircle update."),
+        notification=messaging.Notification(title=title, body=body),
         data={"notification_id": str(notification.id), "recipient_uid": recipient_uid},
         android=messaging.AndroidConfig(priority="high", ttl=timedelta(hours=24),
             notification=messaging.AndroidNotification(channel_id="safecircle_alerts", tag=f"safecircle-{notification.id}")),

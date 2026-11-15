@@ -45,9 +45,12 @@ class PushService extends NotificationService {
   PushService(ManagementApi api, String? Function() owner)
       : super(apiService: api, currentUserId: owner);
   int displayed = 0;
+  final copies = <({String title, String body})>[];
   @override
-  Future<void> showNotification(RemoteMessage message) async {
+  Future<void> showNotification(RemoteMessage message,
+      {AppNotification? inboxNotification}) async {
     displayed++;
+    copies.add(NotificationService.notificationCopy(inboxNotification));
   }
 }
 
@@ -65,6 +68,10 @@ void main() {
     await service.receive(push(1));
     await service.receive(push(1));
     expect(service.displayed, 1);
+    expect(
+      service.copies.single,
+      (title: 'SafeCircle', body: 'You have a SafeCircle update.'),
+    );
     expect(refreshes, 2);
     await service.receive(push(1, owner: 'bob'));
     expect(service.displayed, 1);
@@ -75,6 +82,28 @@ void main() {
     service.bindUser(owner);
     await service.receive(push(1));
     expect(service.displayed, 1);
+    await service.dispose();
+  });
+
+  test('foreground emergency and ordinary notifications use matching copy',
+      () async {
+    final api = ManagementApi()
+      ..notifications = [
+        testNotification(1),
+        testNotification(2, category: 'emergency'),
+      ];
+    final service = PushService(api, () => 'alice')..bindUser('alice');
+
+    await service.receive(push(1));
+    await service.receive(push(2));
+
+    expect(service.copies, [
+      (title: 'SafeCircle', body: 'You have a SafeCircle update.'),
+      (
+        title: 'SafeCircle emergency alert',
+        body: 'An emergency contact has triggered a panic alert.',
+      ),
+    ]);
     await service.dispose();
   });
   test(

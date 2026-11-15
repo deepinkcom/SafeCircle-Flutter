@@ -7,10 +7,25 @@ from firebase_admin import messaging
 SUBMISSION_TIMEOUT_SECONDS = 20
 
 
-def _submit(connection, token, notification_id, recipient_uid):
+def _submit(
+    connection,
+    token,
+    notification_id,
+    recipient_uid,
+    category,
+    event_type,
+):
     from .notification_service import firebase_notification_delivery
     try:
-        firebase_notification_delivery(token, SimpleNamespace(id=notification_id), recipient_uid)
+        firebase_notification_delivery(
+            token,
+            SimpleNamespace(
+                id=notification_id,
+                category=category,
+                event_type=event_type,
+            ),
+            recipient_uid,
+        )
         result = "sent"
     except messaging.UnregisteredError:
         result = "unregistered"
@@ -30,7 +45,18 @@ def bounded_firebase_delivery(token, notification, recipient_uid, *,
         raise ValueError("Invalid push submission deadline")
     context = multiprocessing.get_context("spawn")
     receive, send = context.Pipe(duplex=False)
-    child = context.Process(target=_target, args=(send, token, notification.id, recipient_uid), daemon=True)
+    child = context.Process(
+        target=_target,
+        args=(
+            send,
+            token,
+            notification.id,
+            recipient_uid,
+            getattr(notification, "category", None),
+            getattr(notification, "event_type", None),
+        ),
+        daemon=True,
+    )
     started = False
     try:
         child.start()

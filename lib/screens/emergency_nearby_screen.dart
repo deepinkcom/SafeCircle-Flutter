@@ -7,6 +7,8 @@ import '../theme/app_colors.dart';
 import '../widgets/real_map.dart';
 import '../widgets/safe_circle_mark.dart';
 
+enum _AcknowledgementAccess { allowed, denied, owner, checking, unavailable }
+
 class EmergencyNearbyScreen extends StatefulWidget {
   const EmergencyNearbyScreen({
     super.key,
@@ -26,17 +28,152 @@ class EmergencyNearbyScreen extends StatefulWidget {
 }
 
 class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
+  String? _relationshipsForUid;
+  int? _relationshipsForSession;
+
   @override
   void initState() {
     super.initState();
     if (widget.notificationAlert == null) {
       context.read<AppState>().loadNearbyAlert();
     }
+    _ensureAcceptedRelationships(context.read<AppState>());
+  }
+
+  void _ensureAcceptedRelationships(AppState state) {
+    final uid = state.userProfile.isSignedIn ? state.userProfile.uid : null;
+    final links = state.contactLinks;
+    final profile = state.backendProfile;
+    if (uid == null ||
+        links.userId != uid ||
+        profile?.profileReady != true ||
+        profile?.id == null) {
+      return;
+    }
+    final session = links.sessionVersion;
+    if (_relationshipsForUid == uid && _relationshipsForSession == session) {
+      return;
+    }
+    _relationshipsForUid = uid;
+    _relationshipsForSession = session;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final current = context.read<AppState>();
+      if (current.userProfile.uid != uid ||
+          current.contactLinks.sessionVersion != session ||
+          current.contactLinks.userId != uid) {
+        return;
+      }
+      current.contactLinks.loadAcceptedRelationships();
+    });
+  }
+
+  _AcknowledgementAccess _acknowledgementAccess(
+      AppState state, NearbyPerson person) {
+    final uid = state.userProfile.isSignedIn ? state.userProfile.uid : null;
+    final links = state.contactLinks;
+    final profile = state.backendProfile;
+    if (uid == null || links.userId != uid) {
+      return state.checkingBackendProfile
+          ? _AcknowledgementAccess.checking
+          : _AcknowledgementAccess.unavailable;
+    }
+    if (profile == null) {
+      return state.checkingBackendProfile || state.backendProfileError == null
+          ? _AcknowledgementAccess.checking
+          : _AcknowledgementAccess.unavailable;
+    }
+    if (!profile.profileReady || profile.id == null) {
+      return _AcknowledgementAccess.unavailable;
+    }
+    final ownerUserId = person.ownerUserId;
+    if (ownerUserId == null || ownerUserId <= 0) {
+      return _AcknowledgementAccess.unavailable;
+    }
+    if (ownerUserId == profile.id) return _AcknowledgementAccess.owner;
+
+    final accepted = links.accepted;
+    if (accepted.error != null || links.isAccessBlocked) {
+      return _AcknowledgementAccess.unavailable;
+    }
+    if (accepted.isLoading || !accepted.hasLoaded) {
+      return _AcknowledgementAccess.checking;
+    }
+    return accepted.items
+            .any((link) => link.isAccepted && link.otherUserId == ownerUserId)
+        ? _AcknowledgementAccess.allowed
+        : _AcknowledgementAccess.denied;
+  }
+
+  Future<void> _retryRelationshipCheck() async {
+    final links = context.read<AppState>().contactLinks;
+    if (links.isAccessBlocked) {
+      await links.retryAccess();
+    } else {
+      await links.loadAcceptedRelationships();
+    }
+  }
+
+  Widget _acknowledgementControl(
+      AppState state, _AcknowledgementAccess access) {
+    if (access == _AcknowledgementAccess.allowed) {
+      return SizedBox(
+        width: double.infinity,
+        height: 54,
+        child: OutlinedButton.icon(
+          onPressed: widget.onImOnMyWay,
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: AppColors.tealPrimary),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+          ),
+          icon:
+              const Icon(Icons.near_me, color: AppColors.tealPrimary, size: 18),
+          label: const Text(
+            "I'm On My Way",
+            style: TextStyle(
+              color: AppColors.tealPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final message = switch (access) {
+      _AcknowledgementAccess.owner =>
+        'You cannot acknowledge your own emergency alert.',
+      _AcknowledgementAccess.denied =>
+        'Only accepted emergency contacts can acknowledge this alert.',
+      _AcknowledgementAccess.checking =>
+        'Checking emergency-contact authorization…',
+      _AcknowledgementAccess.unavailable => state
+              .contactLinks.needsAuthentication
+          ? 'Your session expired. Sign in again to verify access.'
+          : state.contactLinks.needsBackendProfile
+              ? 'Complete your SafeCircle profile to verify access.'
+              : 'We could not verify your emergency-contact access. Please retry.',
+      _AcknowledgementAccess.allowed => '',
+    };
+    return Column(
+      children: [
+        Text(message, textAlign: TextAlign.center),
+        if (access == _AcknowledgementAccess.unavailable &&
+            !state.contactLinks.needsAuthentication)
+          TextButton(
+            onPressed: _retryRelationshipCheck,
+            child: const Text('Retry access check'),
+          ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    _ensureAcceptedRelationships(state);
     final person = widget.notificationAlert == null
         ? state.nearbyPerson
         : state.notifications.sessionVersion == widget.notificationSession
@@ -60,14 +197,18 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    'No nearby emergencies detected',
+                    widget.notificationAlert != null
+                        ? 'This emergency alert is unavailable'
+                        : 'No nearby emergencies detected',
                     textAlign: TextAlign.center,
                     style: textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'There are no active emergency alerts '
-                    'near your current location.',
+                  Text(
+                    widget.notificationAlert != null
+                        ? 'It may have been resolved or you may no longer have access.'
+                        : 'There are no active emergency alerts '
+                            'near your current location.',
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
@@ -107,27 +248,31 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                   horizontal: 20,
                   vertical: 16,
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.report_problem,
                       color: Colors.white,
                     ),
-                    SizedBox(width: 12),
+                    const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Emergency Nearby',
-                          style: TextStyle(
+                          widget.notificationAlert == null
+                              ? 'Emergency Nearby'
+                              : 'Connection Emergency',
+                          style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 18,
                           ),
                         ),
                         Text(
-                          'Someone near you needs help',
-                          style: TextStyle(
+                          widget.notificationAlert == null
+                              ? 'Someone near you needs help'
+                              : 'Your connection needs help',
+                          style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 13,
                           ),
@@ -168,7 +313,9 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Someone nearby\nneeds your help',
+                      widget.notificationAlert == null
+                          ? 'Someone nearby\nneeds your help'
+                          : 'Your SafeCircle connection\nneeds your help',
                       style: textTheme.headlineMedium?.copyWith(
                         fontSize: 26,
                       ),
@@ -366,35 +513,9 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          await widget.onImOnMyWay();
-                        },
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(
-                            color: AppColors.tealPrimary,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(28),
-                          ),
-                        ),
-                        icon: const Icon(
-                          Icons.near_me,
-                          color: AppColors.tealPrimary,
-                          size: 18,
-                        ),
-                        label: const Text(
-                          "I'm On My Way",
-                          style: TextStyle(
-                            color: AppColors.tealPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                    _acknowledgementControl(
+                      state,
+                      _acknowledgementAccess(state, person),
                     ),
                   ],
                 ),
