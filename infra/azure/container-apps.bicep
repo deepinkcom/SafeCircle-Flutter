@@ -20,24 +20,30 @@ param firebaseServiceAccountJson string
 @description('Public HTTPS API hostname assigned to the API Container App after ingress creation.')
 param apiIngressExternal bool = true
 
-@description('Minimum API replicas. Keep at least one for emergency-service availability.')
-@minValue(1)
+@description('Minimum API replicas. Set to 1 for demo readiness; 0 allows scale-to-zero only outside emergency-use windows.')
+@minValue(0)
 param apiMinReplicas int = 1
 
 @description('Maximum API replicas.')
 @minValue(1)
-param apiMaxReplicas int = 3
+param apiMaxReplicas int = 1
 
 @description('Worker replicas. Polling worker must not scale to zero.')
 @minValue(1)
 @maxValue(1)
 param workerReplicas int = 1
 
-@description('CPU allocation for each container.')
-param cpuCores string = '0.5'
+@description('API CPU allocation.')
+param apiCpuCores string = '0.5'
 
-@description('Memory allocation for each container.')
-param memorySize string = '1Gi'
+@description('API memory allocation.')
+param apiMemorySize string = '1Gi'
+
+@description('Polling worker CPU allocation; validate performance before reducing.')
+param workerCpuCores string = '0.25'
+
+@description('Polling worker memory allocation; validate performance before reducing.')
+param workerMemorySize string = '0.5Gi'
 
 var location = resourceGroup().location
 var registryServer = '${acrName}.azurecr.io'
@@ -120,8 +126,8 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             }
           ]
           resources: {
-            cpu: json(cpuCores)
-            memory: memorySize
+            cpu: json(apiCpuCores)
+            memory: apiMemorySize
           }
           probes: [
             {
@@ -214,8 +220,8 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
             }
           ]
           resources: {
-            cpu: json(cpuCores)
-            memory: memorySize
+            cpu: json(workerCpuCores)
+            memory: workerMemorySize
           }
         }
       ]
