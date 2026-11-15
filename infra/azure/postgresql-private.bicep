@@ -43,10 +43,10 @@ param storageSizeGB int = 32
 param backupRetentionDays int = 7
 
 @description('Virtual network name shared with the separately configured Container Apps environment.')
-param virtualNetworkName string = 'vnet-safecircle-prod'
+param virtualNetworkName string = 'vnet-safecircle-student'
 
 @description('Private DNS zone name for PostgreSQL Flexible Server.')
-param privateDnsZoneName string = 'privatelink.postgres.database.azure.com'
+param privateDnsZoneName string = 'safecircle.private.postgres.database.azure.com'
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   name: virtualNetworkName
@@ -54,14 +54,14 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        '10.40.0.0/16'
+        '10.20.0.0/16'
       ]
     }
     subnets: [
       {
-        name: 'snet-postgres-delegated'
+        name: 'snet-postgres'
         properties: {
-          addressPrefix: '10.40.2.0/24'
+          addressPrefix: '10.20.1.0/27'
           delegations: [
             {
               name: 'postgres-flexible-server'
@@ -73,9 +73,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
         }
       }
       {
-        name: 'snet-container-apps-infrastructure'
+        name: 'snet-containerapps'
         properties: {
-          addressPrefix: '10.40.0.0/23'
+          addressPrefix: '10.20.2.0/27'
           delegations: [
             {
               name: 'container-apps'
@@ -84,13 +84,6 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
               }
             }
           ]
-        }
-      }
-      {
-        name: 'snet-private-endpoints'
-        properties: {
-          addressPrefix: '10.40.3.0/24'
-          privateEndpointNetworkPolicies: 'Disabled'
         }
       }
     ]
@@ -127,7 +120,7 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
     administratorLoginPassword: administratorPassword
     storage: {
       storageSizeGB: storageSizeGB
-      autoGrow: 'Enabled'
+      autoGrow: 'Disabled'
       tier: 'P4'
     }
     backup: {
