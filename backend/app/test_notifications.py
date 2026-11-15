@@ -20,7 +20,10 @@ def send_test_notification(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if os.getenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "").lower() != "true":
+    if (
+        os.getenv("SAFECIRCLE_ENV", "").lower() != "development"
+        or os.getenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "").lower() != "true"
+    ):
         raise HTTPException(
             status_code=404,
             detail="Not found",

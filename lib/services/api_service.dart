@@ -240,6 +240,42 @@ class ApiService {
     });
   }
 
+  /// Fetch the active alert referenced by this exact recipient-owned inbox row.
+  /// The backend rechecks notification ownership and current relationship access.
+  Future<Map<String, dynamic>> fetchEmergencyAlertForNotification(
+      int notificationId) {
+    _linkId(notificationId);
+    return _request('GET', '/notifications/$notificationId/alert',
+        parse: (value) {
+      final alert = _object(value);
+      final id = alert['id'];
+      final ownerUserId = alert['owner_user_id'];
+      final latitude = alert['latitude'];
+      final longitude = alert['longitude'];
+      if (id is! int ||
+          id <= 0 ||
+          ownerUserId is! int ||
+          ownerUserId <= 0 ||
+          alert['kind'] != 'panic' ||
+          alert['status'] != 'active' ||
+          latitude is! num ||
+          longitude is! num ||
+          !latitude.isFinite ||
+          !longitude.isFinite ||
+          latitude < -90 ||
+          latitude > 90 ||
+          longitude < -180 ||
+          longitude > 180 ||
+          alert['created_at'] is! String) {
+        throw const FormatException('Invalid emergency alert response.');
+      }
+      if (DateTime.tryParse(alert['created_at'] as String) == null) {
+        throw const FormatException('Invalid emergency alert timestamp.');
+      }
+      return alert;
+    });
+  }
+
   Future<void> manageNotifications(String operation,
       {NotificationCategory? category, int? id}) {
     if (!{'read-all', 'clear-read', 'clear-all', 'delete'}

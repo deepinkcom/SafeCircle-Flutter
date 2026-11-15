@@ -519,42 +519,32 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
                     onSignIn: widget.onSignInAgain,
                     onCompleteProfile: _openConnectionProfile))));
       } else if (item.category == NotificationCategory.emergency) {
-        final history = await app.loadNotificationAlertHistory(item.sourceId);
+        final alert = await app.findNotificationAlert(item.id, item.sourceId);
         if (!current()) return null;
-        if (history) {
-          resolving = false;
-          await navigator.push<void>(MaterialPageRoute(
-              builder: (_) =>
-                  AlertHistoryScreen(notificationSession: session)));
-        } else {
-          final alert = await app.findNotificationNearbyAlert(item.sourceId);
-          if (!current()) return null;
-          if (alert == null) {
-            return 'This emergency alert is unavailable, resolved, or outside your accessible nearby alerts.';
-          }
-          resolving = false;
-          await navigator.push<void>(MaterialPageRoute(
-              builder: (destinationContext) => EmergencyNearbyScreen(
-                  notificationAlert: alert,
-                  notificationSession: session,
-                  onBack: () => navigator.pop(),
-                  onImOnMyWay: () async {
-                    if (!current() ||
-                        !destinationContext.mounted ||
-                        !(ModalRoute.of(destinationContext)?.isCurrent ??
-                            false)) {
-                      return;
-                    }
-                    await app.acknowledgeNearbyAlert(
-                        notificationAlert: alert, notificationSession: session);
-                    if (current() &&
-                        destinationContext.mounted &&
-                        (ModalRoute.of(destinationContext)?.isCurrent ??
-                            false)) {
-                      navigator.pop();
-                    }
-                  })));
+        if (alert == null) {
+          return 'This emergency alert is unavailable or no longer active.';
         }
+        resolving = false;
+        await navigator.push<void>(MaterialPageRoute(
+            builder: (destinationContext) => EmergencyNearbyScreen(
+                notificationAlert: alert,
+                notificationSession: session,
+                onBack: () => navigator.pop(),
+                onImOnMyWay: () async {
+                  if (!current() ||
+                      !destinationContext.mounted ||
+                      !(ModalRoute.of(destinationContext)?.isCurrent ??
+                          false)) {
+                    return;
+                  }
+                  await app.acknowledgeNearbyAlert(
+                      notificationAlert: alert, notificationSession: session);
+                  if (current() &&
+                      destinationContext.mounted &&
+                      (ModalRoute.of(destinationContext)?.isCurrent ?? false)) {
+                    navigator.pop();
+                  }
+                })));
       } else {
         return 'This notification type is not supported yet.';
       }
@@ -565,7 +555,7 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
       return failure.message;
     } catch (_) {
       return current()
-          ? 'Could not check this notification source. Check your connection and location permission, then try again.'
+          ? 'Could not check this notification source. Check your connection, then try again.'
           : null;
     }
   }

@@ -5,13 +5,21 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from geoalchemy2 import Geography
 
 from app.auth import get_db
 from app.contact_links import ContactLinkResponse, _link_response, _link_responses, router
 from app.contacts import router as contacts_router
-from app.models import EmergencyContact, Device, EmergencyContactLink, Notification, PushDelivery, User
+from app.models import Alert, EmergencyContact, Device, EmergencyContactLink, Notification, PushDelivery, User
+
+
+@compiles(Geography, "sqlite")
+def _compile_geography_for_sqlite(_type, _compiler, **_kwargs):
+    # Alert route integration tests use null geometry and stub only PostGIS readers.
+    return "TEXT"
 
 
 RELATIONSHIP_REQUESTS = [
@@ -39,9 +47,15 @@ def database(tmp_path):
     @event.listens_for(engine, "connect")
     def enable_foreign_keys(connection, _):
         connection.execute("PRAGMA foreign_keys=ON")
+        connection.create_function("ST_GeogFromText", 1, lambda value: value)
+        connection.create_function("AsBinary", 1, lambda value: value)
+
+    # The route tests use a plain SQLite column; PostGIS owns spatial indexes.
+    original_spatial_index = Alert.__table__.c.location.type.spatial_index
+    Alert.__table__.c.location.type.spatial_index = False
 
     # Exclude unrelated PostGIS tables; use the real user/contact/link models.
-    for model in (User, EmergencyContact, EmergencyContactLink, Device, Notification, PushDelivery):
+    for model in (User, EmergencyContact, EmergencyContactLink, Device, Alert, Notification, PushDelivery):
         model.__table__.create(engine)
     with Session(engine) as db:
         db.add_all([
@@ -61,6 +75,7 @@ def database(tmp_path):
         db.commit()
     yield engine
     engine.dispose()
+    Alert.__table__.c.location.type.spatial_index = original_spatial_index
 
 
 @pytest.fixture

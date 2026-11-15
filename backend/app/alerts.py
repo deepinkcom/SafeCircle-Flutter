@@ -1,5 +1,6 @@
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from geoalchemy2 import Geometry
@@ -11,15 +12,18 @@ from geoalchemy2.functions import (
     ST_Y,
 )
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user, get_db
-from .models import Alert, AlertAcknowledgement, User
+
+from .models import Alert, AlertAcknowledgement, EmergencyContactLink, User
+from .notification_events import record_emergency_alert_events
 
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+logger = logging.getLogger(__name__)
 
 
 class PanicAlertCreate(BaseModel):
@@ -58,11 +62,31 @@ def create_panic_alert(
         location=point,
         location_label=alert_data.location_label,
         created_at=datetime.now(timezone.utc),
+        notification_events_status="pending",
     )
 
     db.add(alert)
     db.commit()
     db.refresh(alert)
+    alert_id = alert.id
+
+    # The alert and pending recovery marker are durable before notification
+    # creation. Event rows and the marker update then commit atomically.
+    try:
+        record_emergency_alert_events(
+            db,
+            alert=alert,
+            created_at=alert.created_at,
+        )
+        alert.notification_events_status = "complete"
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        logger.error(
+            "panic_notification_event_creation_failed",
+            extra={"alert_id": alert_id, "exception_type": type(error).__name__},
+        )
+        alert = db.get(Alert, alert_id)
 
     return {
         "id": alert.id,
@@ -73,6 +97,7 @@ def create_panic_alert(
         "longitude": alert_data.longitude,
         "location_label": alert.location_label,
         "created_at": alert.created_at.isoformat(),
+        "notification_events_status": alert.notification_events_status,
     }
 
 
@@ -85,7 +110,7 @@ def resolve_alert(
     statement = select(Alert).where(
         Alert.id == alert_id,
         Alert.user_id == current_user.id,
-    )
+    ).with_for_update()
 
     alert = db.scalar(statement)
 
@@ -128,24 +153,35 @@ def acknowledge_alert(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Lock the active alert first, matching the worker's alert->link lock order.
+    # A recipient must still have an accepted connection to the alert owner.
     alert = db.scalar(
-        select(Alert).where(
+        select(Alert)
+        .where(
             Alert.id == alert_id,
             Alert.status == "active",
+            Alert.user_id != current_user.id,
         )
+        .with_for_update()
     )
-
     if alert is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Active alert not found",
-        )
+        raise HTTPException(status_code=404, detail="Active alert not found")
 
-    if alert.user_id == current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="You cannot acknowledge your own alert",
+    accepted_link = db.scalar(
+        select(EmergencyContactLink.id)
+        .where(
+            EmergencyContactLink.status == "accepted",
+            or_(
+                (EmergencyContactLink.inviter_user_id == alert.user_id)
+                & (EmergencyContactLink.invitee_user_id == current_user.id),
+                (EmergencyContactLink.invitee_user_id == alert.user_id)
+                & (EmergencyContactLink.inviter_user_id == current_user.id),
+            ),
         )
+        .with_for_update()
+    )
+    if accepted_link is None:
+        raise HTTPException(status_code=404, detail="Active alert not found")
 
     acknowledgement = db.scalar(
         select(AlertAcknowledgement).where(
@@ -304,6 +340,7 @@ def get_nearby_alerts(
     return [
         {
             "id": alert.id,
+            "owner_user_id": alert.user_id,
             "kind": alert.kind,
             "status": alert.status,
             "location_label": alert.location_label,

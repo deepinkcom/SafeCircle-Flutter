@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -46,9 +45,13 @@ class ProfilePhotoService {
   FirebaseStorage get _storage => _providedStorage ?? FirebaseStorage.instance;
   UserRepository get _repository => _users ?? UserRepository();
   bool sessionMatches(String uid) => !_disposed && _uid == uid;
-  bool isCurrentOwner(String uid) => FirebaseBootstrap.isReady &&
-      !_disposed && _uid == uid && _firebaseAuth.currentUser?.uid == uid;
-  bool get cameraSupported => !kIsWeb &&
+  bool isCurrentOwner(String uid) =>
+      FirebaseBootstrap.isReady &&
+      !_disposed &&
+      _uid == uid &&
+      _firebaseAuth.currentUser?.uid == uid;
+  bool get cameraSupported =>
+      !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
@@ -56,7 +59,9 @@ class ProfilePhotoService {
     _epoch++;
     _uid = uid == null || uid.isEmpty ? null : uid;
     final upload = _upload;
-    if (upload != null) unawaited(upload.cancel().catchError((Object _) => false));
+    if (upload != null) {
+      unawaited(upload.cancel().catchError((Object _) => false));
+    }
   }
 
   void _watchAuthentication() {
@@ -67,33 +72,46 @@ class ProfilePhotoService {
       _observedUid = user?.uid;
       _epoch++;
       final upload = _upload;
-      if (upload != null) unawaited(upload.cancel().catchError((Object _) => false));
+      if (upload != null) {
+        unawaited(upload.cancel().catchError((Object _) => false));
+      }
       if (!_disposed) onSessionInvalidated?.call();
     }, onError: (Object _) {
       _epoch++;
       _uid = null;
       final upload = _upload;
-      if (upload != null) unawaited(upload.cancel().catchError((Object _) => false));
+      if (upload != null) {
+        unawaited(upload.cancel().catchError((Object _) => false));
+      }
       if (!_disposed) onSessionInvalidated?.call();
     });
   }
 
   void _guard(String uid, int epoch, bool Function() isCurrent) {
-    if (!FirebaseBootstrap.isReady || _disposed || _uid != uid ||
-        _epoch != epoch || !isCurrent() || _firebaseAuth.currentUser?.uid != uid) {
-      throw const ProfilePhotoFailure('The photo session changed. Close and try again.');
+    if (!FirebaseBootstrap.isReady ||
+        _disposed ||
+        _uid != uid ||
+        _epoch != epoch ||
+        !isCurrent() ||
+        _firebaseAuth.currentUser?.uid != uid) {
+      throw const ProfilePhotoFailure(
+          'The photo session changed. Close and try again.');
     }
   }
 
   void _ready(String uid) {
-    if (!FirebaseBootstrap.isReady || _disposed || uid.isEmpty || _uid != uid ||
+    if (!FirebaseBootstrap.isReady ||
+        _disposed ||
+        uid.isEmpty ||
+        _uid != uid ||
         _firebaseAuth.currentUser?.uid != uid) {
       throw const ProfilePhotoFailure('Sign in before changing your picture.');
     }
     _watchAuthentication();
   }
 
-  ProfilePhotoFailure _safeFailure(Object error, {bool requiresRefresh = false}) {
+  ProfilePhotoFailure _safeFailure(Object error,
+      {bool requiresRefresh = false}) {
     if (error is ProfilePhotoFailure && !requiresRefresh) return error;
     var message = 'The picture could not be processed. Please try again.';
     if (error is FirebaseException) {
@@ -101,7 +119,8 @@ class ProfilePhotoService {
         case 'unauthenticated':
         case 'unauthorized':
         case 'permission-denied':
-          message = 'Photo access was denied. Check your sign-in and storage configuration.';
+          message =
+              'Photo access was denied. Check your sign-in and storage configuration.';
           break;
         case 'bucket-not-found':
         case 'project-not-found':
@@ -112,11 +131,13 @@ class ProfilePhotoService {
           message = 'The picture operation was cancelled.';
           break;
         default:
-          message = 'Photo storage is unavailable. Check your connection and retry.';
+          message =
+              'Photo storage is unavailable. Check your connection and retry.';
           break;
       }
     } else if (error is PlatformException) {
-      message = 'Camera or photo access is unavailable. Check device permissions and try again.';
+      message =
+          'Camera or photo access is unavailable. Check device permissions and try again.';
     }
     return ProfilePhotoFailure(
       requiresRefresh
@@ -132,16 +153,22 @@ class ProfilePhotoService {
     required bool Function() isCurrent,
   }) async {
     _ready(uid);
-    if (_busy) throw const ProfilePhotoFailure('A picture operation is already running.');
+    if (_busy) {
+      throw const ProfilePhotoFailure(
+          'A picture operation is already running.');
+    }
     if (source == ProfilePhotoSource.camera && !cameraSupported) {
-      throw const ProfilePhotoFailure('Camera capture is available on Android and iOS.');
+      throw const ProfilePhotoFailure(
+          'Camera capture is available on Android and iOS.');
     }
     final epoch = _epoch;
     _busy = true;
     try {
       _guard(uid, epoch, isCurrent);
       final file = await (_picker ?? ImagePicker()).pickImage(
-        source: source == ProfilePhotoSource.camera ? ImageSource.camera : ImageSource.gallery,
+        source: source == ProfilePhotoSource.camera
+            ? ImageSource.camera
+            : ImageSource.gallery,
         maxWidth: 1024,
         maxHeight: 1024,
         imageQuality: 85,
@@ -151,7 +178,8 @@ class ProfilePhotoService {
       if (file == null) return null;
       final length = await file.length();
       if (length <= 0 || length > maxInputBytes) {
-        throw const ProfilePhotoFailure('Choose a JPEG or PNG picture no larger than 8 MiB after selection.');
+        throw const ProfilePhotoFailure(
+            'Choose a JPEG or PNG picture no larger than 8 MiB after selection.');
       }
       final builder = BytesBuilder(copy: false);
       var count = 0;
@@ -159,7 +187,8 @@ class ProfilePhotoService {
         _guard(uid, epoch, isCurrent);
         count += chunk.length;
         if (count > maxInputBytes) {
-          throw const ProfilePhotoFailure('The selected picture exceeds the 8 MiB limit.');
+          throw const ProfilePhotoFailure(
+              'The selected picture exceeds the 8 MiB limit.');
         }
         builder.add(chunk);
       }
@@ -184,12 +213,17 @@ class ProfilePhotoService {
   }
 
   Future<Uint8List> _normalize(Uint8List input) async {
-    final jpeg = input.length >= 3 && input[0] == 255 && input[1] == 216 && input[2] == 255;
+    final jpeg = input.length >= 3 &&
+        input[0] == 255 &&
+        input[1] == 216 &&
+        input[2] == 255;
     const pngHeader = [137, 80, 78, 71, 13, 10, 26, 10];
     final png = input.length >= 8 &&
-        List.generate(8, (i) => input[i] == pngHeader[i]).every((value) => value);
+        List.generate(8, (i) => input[i] == pngHeader[i])
+            .every((value) => value);
     if (input.isEmpty || input.length > maxInputBytes || (!jpeg && !png)) {
-      throw const ProfilePhotoFailure('Only valid JPEG and PNG pictures are supported.');
+      throw const ProfilePhotoFailure(
+          'Only valid JPEG and PNG pictures are supported.');
     }
     final buffer = await ui.ImmutableBuffer.fromUint8List(input);
     ui.ImageDescriptor? descriptor;
@@ -197,10 +231,13 @@ class ProfilePhotoService {
     ui.Image? image;
     try {
       descriptor = await ui.ImageDescriptor.encoded(buffer);
-      if (descriptor.width <= 0 || descriptor.height <= 0 ||
-          descriptor.width > 8192 || descriptor.height > 8192 ||
+      if (descriptor.width <= 0 ||
+          descriptor.height <= 0 ||
+          descriptor.width > 8192 ||
+          descriptor.height > 8192 ||
           descriptor.width * descriptor.height > 24000000) {
-        throw const ProfilePhotoFailure('That picture is too large to process safely.');
+        throw const ProfilePhotoFailure(
+            'That picture is too large to process safely.');
       }
       final scale = min(1.0, 512 / max(descriptor.width, descriptor.height));
       codec = await descriptor.instantiateCodec(
@@ -210,10 +247,12 @@ class ProfilePhotoService {
       image = (await codec.getNextFrame()).image;
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data == null || data.lengthInBytes > maxStoredBytes) {
-        throw const ProfilePhotoFailure('The processed picture exceeds the 2 MiB limit.');
+        throw const ProfilePhotoFailure(
+            'The processed picture exceeds the 2 MiB limit.');
       }
       // Re-encoding drops the original filename and EXIF/GPS metadata.
-      return Uint8List.fromList(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
+      return Uint8List.fromList(
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
     } finally {
       image?.dispose();
       codec?.dispose();
@@ -222,7 +261,8 @@ class ProfilePhotoService {
     }
   }
 
-  Future<ProfilePhotoResult> load({required String uid, required bool Function() isCurrent}) async {
+  Future<ProfilePhotoResult> load(
+      {required String uid, required bool Function() isCurrent}) async {
     _ready(uid);
     final epoch = _epoch;
     try {
@@ -233,7 +273,9 @@ class ProfilePhotoService {
       try {
         final bytes = await _storage.ref(path).getData(maxStoredBytes);
         _guard(uid, epoch, isCurrent);
-        if (bytes == null || bytes.isEmpty) throw const ProfilePhotoFailure('Picture unavailable.');
+        if (bytes == null || bytes.isEmpty) {
+          throw const ProfilePhotoFailure('Picture unavailable.');
+        }
         Uint8List? normalized;
         try {
           normalized = await _normalize(bytes);
@@ -247,7 +289,8 @@ class ProfilePhotoService {
         }
       } catch (error) {
         _guard(uid, epoch, isCurrent);
-        return ProfilePhotoResult(path: path, warning: _safeFailure(error).message);
+        return ProfilePhotoResult(
+            path: path, warning: _safeFailure(error).message);
       }
     } catch (error) {
       throw _safeFailure(error);
@@ -262,12 +305,20 @@ class ProfilePhotoService {
     void Function(double)? onProgress,
   }) async {
     _ready(uid);
-    if (_busy) throw const ProfilePhotoFailure('A picture operation is already running.');
-    final epoch = _epoch;
-    if (draft != null && (draft.disposed || draft.ownerUid != uid || draft.sessionEpoch != epoch)) {
-      throw const ProfilePhotoFailure('Select a new picture for the current session.');
+    if (_busy) {
+      throw const ProfilePhotoFailure(
+          'A picture operation is already running.');
     }
-    if (expectedPath != null && !ProfilePhotoReference.valid(uid, expectedPath)) {
+    final epoch = _epoch;
+    if (draft != null &&
+        (draft.disposed ||
+            draft.ownerUid != uid ||
+            draft.sessionEpoch != epoch)) {
+      throw const ProfilePhotoFailure(
+          'Select a new picture for the current session.');
+    }
+    if (expectedPath != null &&
+        !ProfilePhotoReference.valid(uid, expectedPath)) {
       throw const ProfilePhotoFailure('Invalid saved picture reference.');
     }
     _busy = true;
@@ -281,27 +332,43 @@ class ProfilePhotoService {
         uploadBytes = await _normalize(draft.bytes);
         _guard(uid, epoch, isCurrent);
         final random = Random.secure();
-        final object = List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+        final object = List.generate(16,
+                (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'))
+            .join();
         nextPath = 'profilePhotos/$uid/$object.png';
-        final task = _storage.ref(nextPath).putData(uploadBytes,
-          SettableMetadata(contentType: 'image/png', cacheControl: 'private, no-store',
-            customMetadata: {'ownerUid': uid}));
+        final task = _storage.ref(nextPath).putData(
+            uploadBytes,
+            SettableMetadata(
+                contentType: 'image/png',
+                cacheControl: 'private, no-store',
+                customMetadata: {'ownerUid': uid}));
         _upload = task;
         progress = task.snapshotEvents.listen((snapshot) {
           if (snapshot.totalBytes > 0 && isCurrent() && _epoch == epoch) {
-            onProgress?.call((snapshot.bytesTransferred / snapshot.totalBytes).clamp(0.0, 1.0).toDouble());
+            onProgress?.call((snapshot.bytesTransferred / snapshot.totalBytes)
+                .clamp(0.0, 1.0)
+                .toDouble());
           }
         }, onError: (Object _) {});
         await task.timeout(const Duration(seconds: 60), onTimeout: () async {
           await task.cancel();
-          throw const ProfilePhotoFailure('Upload timed out. Refresh before trying again.', requiresRefresh: true);
+          throw const ProfilePhotoFailure(
+              'Upload timed out. Refresh before trying again.',
+              requiresRefresh: true);
         });
         _guard(uid, epoch, isCurrent);
       }
       committing = true;
-      await _repository.compareAndSetPhoto(uid: uid, expectedPath: expectedPath, nextPath: nextPath,
-        isCurrent: () => !_disposed && _epoch == epoch && _uid == uid &&
-            _firebaseAuth.currentUser?.uid == uid && isCurrent());
+      await _repository.compareAndSetPhoto(
+          uid: uid,
+          expectedPath: expectedPath,
+          nextPath: nextPath,
+          isCurrent: () =>
+              !_disposed &&
+              _epoch == epoch &&
+              _uid == uid &&
+              _firebaseAuth.currentUser?.uid == uid &&
+              isCurrent());
       _guard(uid, epoch, isCurrent);
       String? warning;
       if (expectedPath != null && expectedPath != nextPath) {
@@ -311,11 +378,14 @@ class ProfilePhotoService {
           await _storage.ref(expectedPath).delete();
           _guard(uid, epoch, isCurrent);
         } catch (_) {
-          warning = 'Picture updated. Previous-file cleanup could not be confirmed.';
+          warning =
+              'Picture updated. Previous-file cleanup could not be confirmed.';
         }
       }
-      return ProfilePhotoResult(path: nextPath,
-        bytes: uploadBytes == null ? null : Uint8List.fromList(uploadBytes), warning: warning);
+      return ProfilePhotoResult(
+          path: nextPath,
+          bytes: uploadBytes == null ? null : Uint8List.fromList(uploadBytes),
+          warning: warning);
     } catch (error) {
       // Never delete an uploaded object after an ambiguous Firestore commit: it
       // might be the current photo. Unreferenced leftovers need reviewed cleanup.

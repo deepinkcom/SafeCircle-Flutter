@@ -1,15 +1,19 @@
 import 'package:safecircle/models/app_notification.dart';
+import 'package:safecircle/services/api_failure.dart';
 
 import 'contact_links_fakes.dart';
 
 Map<String, dynamic> notificationJson(int id,
-        {String category = 'connection', bool read = false, int source = 7}) =>
+        {String category = 'connection',
+        String? eventType,
+        bool read = false,
+        int source = 7}) =>
     {
       'id': id,
       'recipient_user_id': 1,
       'category': category,
-      'event_type':
-          category == 'connection' ? 'connection.invited' : 'emergency.created',
+      'event_type': eventType ??
+          (category == 'connection' ? 'connection.invited' : 'emergency.panic'),
       'source_id': source,
       'created_at': '2026-11-08T10:00:00+00:00',
       'read_at': read ? '2026-11-08T11:00:00+00:00' : null,
@@ -18,9 +22,12 @@ Map<String, dynamic> notificationJson(int id,
     };
 
 AppNotification testNotification(int id,
-        {String category = 'connection', bool read = false, int source = 7}) =>
-    AppNotification.fromJson(
-        notificationJson(id, category: category, read: read, source: source));
+        {String category = 'connection',
+        String? eventType,
+        bool read = false,
+        int source = 7}) =>
+    AppNotification.fromJson(notificationJson(id,
+        category: category, eventType: eventType, read: read, source: source));
 
 class NotificationsFakeApi extends ContactLinksFakeApi {
   List<AppNotification> notifications = [];
@@ -33,6 +40,9 @@ class NotificationsFakeApi extends ContactLinksFakeApi {
   List<Map<String, dynamic>> history = [];
   List<Map<String, dynamic>> nearby = [];
   int historyCalls = 0, nearbyCalls = 0;
+  Map<String, dynamic>? notificationAlert;
+  int notificationAlertCalls = 0;
+  int? notificationAlertId;
 
   @override
   Future<NotificationPage> fetchNotifications(
@@ -87,5 +97,16 @@ class NotificationsFakeApi extends ContactLinksFakeApi {
       double radiusKm = 1}) async {
     nearbyCalls++;
     return nearby;
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchEmergencyAlertForNotification(
+      int id) async {
+    notificationAlertCalls++;
+    notificationAlertId = id;
+    if (notificationAlert == null) {
+      throw const ApiFailure(ApiFailureKind.notFound);
+    }
+    return notificationAlert!;
   }
 }

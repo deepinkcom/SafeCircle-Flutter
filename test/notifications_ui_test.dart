@@ -111,29 +111,28 @@ void main() {
     expect(find.byType(NotificationsScreen), findsNothing);
   });
   testWidgets(
-      'notification-opened history hides previous-session records on account switch',
+      'notification-opened alert hides source details on account switch',
       (tester) async {
     final api = NotificationsFakeApi()
       ..notifications = [testNotification(1, category: 'emergency', read: true)]
-      ..history = [
-        {
-          'id': 7,
-          'kind': 'panic',
-          'status': 'resolved',
-          'created_at': '2026-11-08T10:00:00Z',
-          'location_label': 'Private previous-session area'
-        }
-      ];
+      ..notificationAlert = {
+        'id': 7,
+        'owner_user_id': 2,
+        'kind': 'panic',
+        'status': 'active',
+        'latitude': 0,
+        'longitude': 0,
+        'created_at': '2026-11-08T10:00:00Z',
+        'location_label': 'Private previous-session area'
+      };
     final app = await boot(tester, api);
     await tester.tap(find.byTooltip('Notifications, 0 unread'));
     await tester.pumpAndSettle();
     await tapText(tester, 'Test notification 1');
-    expect(find.byType(AlertHistoryScreen), findsOneWidget);
+    expect(find.byType(EmergencyNearbyScreen), findsOneWidget);
     app.userProfile = testProfile('bob');
     await tester.pumpAndSettle();
-    expect(
-        find.text('This notification is unavailable in the current session.'),
-        findsOneWidget);
+    expect(find.text('This emergency alert is unavailable'), findsOneWidget);
     expect(find.text('Private previous-session area'), findsNothing);
   });
   testWidgets(
@@ -144,6 +143,7 @@ void main() {
       ..history = [
         {
           'id': 7,
+          'owner_user_id': 2,
           'alert_id': 99,
           'kind': 'nearby_received',
           'status': 'on_my_way',
@@ -156,7 +156,7 @@ void main() {
     await tapText(tester, 'Test notification 1');
     expect(find.byType(NotificationsScreen), findsOneWidget);
     expect(find.byType(AlertHistoryScreen), findsNothing);
-    expect(find.textContaining('outside your accessible nearby alerts'),
+    expect(find.textContaining('This emergency alert is unavailable'),
         findsOneWidget);
   });
   testWidgets(
@@ -414,43 +414,20 @@ void main() {
     expect(app.notifications.userId, isNull);
   });
   testWidgets(
-      'emergency accessible in real history opens existing history screen',
+      'emergency opens exact notification-bound alert outside nearby search',
       (tester) async {
     final api = NotificationsFakeApi()
       ..notifications = [testNotification(1, category: 'emergency', read: true)]
-      ..history = [
-        {
-          'id': 7,
-          'kind': 'panic',
-          'status': 'resolved',
-          'created_at': '2026-11-08T10:00:00Z',
-          'location_label': 'Synthetic area'
-        }
-      ];
-    await boot(tester, api);
-    await tester.tap(find.byTooltip('Notifications, 0 unread'));
-    await tester.pumpAndSettle();
-    await tapText(tester, 'Test notification 1');
-    expect(find.byType(AlertHistoryScreen), findsOneWidget);
-    expect(api.nearbyCalls, 0);
-  });
-  testWidgets(
-      'emergency matches exact accessible nearby ID, never the first result',
-      (tester) async {
-    final api = NotificationsFakeApi()
-      ..notifications = [testNotification(1, category: 'emergency', read: true)]
-      ..nearby = [
-        for (final id in [6, 7])
-          {
-            'id': id,
-            'status': 'active',
-            'distance_km': 1,
-            'latitude': 0,
-            'longitude': 0,
-            'created_at': '2026-11-08T10:00:00Z',
-            'location_label': 'Area $id'
-          }
-      ];
+      ..notificationAlert = {
+        'id': 7,
+        'owner_user_id': 2,
+        'kind': 'panic',
+        'status': 'active',
+        'latitude': 0,
+        'longitude': 0,
+        'created_at': '2026-11-08T10:00:00Z',
+        'location_label': 'Area 7'
+      };
     final app = await boot(tester, api);
     await tester.tap(find.byTooltip('Notifications, 0 unread'));
     await tester.pumpAndSettle();
@@ -460,30 +437,32 @@ void main() {
     expect(screen.notificationAlert!.id, 7);
     expect(app.nearbyPerson, isNull);
     expect(screen.notificationAlert!.locationLabel, 'Area 7');
-    expect(find.text('Area 6'), findsNothing);
+    expect(api.notificationAlertId, 1);
+    expect(api.nearbyCalls, 0);
+    expect(find.text('Your SafeCircle connection\nneeds your help'),
+        findsOneWidget);
   });
   testWidgets('inaccessible emergency does not invent or substitute an alert',
       (tester) async {
     final api = NotificationsFakeApi()
       ..notifications = [testNotification(1, category: 'emergency', read: true)]
-      ..nearby = [
-        {
-          'id': 6,
-          'status': 'active',
-          'distance_km': 1,
-          'latitude': 0,
-          'longitude': 0,
-          'created_at': '2026-11-08T10:00:00Z'
-        }
-      ];
+      ..notificationAlert = {
+        'id': 6,
+        'kind': 'panic',
+        'status': 'active',
+        'latitude': 0,
+        'longitude': 0,
+        'created_at': '2026-11-08T10:00:00Z'
+      };
     final app = await boot(tester, api);
     await tester.tap(find.byTooltip('Notifications, 0 unread'));
     await tester.pumpAndSettle();
     await tapText(tester, 'Test notification 1');
     expect(find.byType(NotificationsScreen), findsOneWidget);
-    expect(find.textContaining('outside your accessible nearby alerts'),
-        findsOneWidget);
+    expect(
+        find.textContaining('unavailable or no longer active'), findsOneWidget);
     expect(app.nearbyPerson, isNull);
+    expect(api.nearbyCalls, 0);
   });
   testWidgets('late connection lookup cannot navigate after account switch',
       (tester) async {

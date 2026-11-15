@@ -3,11 +3,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, StrictBool, field_serializer
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, update, or_
 from sqlalchemy.orm import Session
+from geoalchemy2 import Geometry
+from geoalchemy2.functions import ST_X, ST_Y
 
 from .auth import get_current_user, get_db
-from .models import Notification, User
+from .models import Alert, EmergencyContactLink, Notification, User
 
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -163,6 +165,62 @@ def get_notification(notification_id: int, response: Response, current_user: Use
     if row is None:
         raise HTTPException(status_code=404, detail="Notification not found")
     return row
+
+
+@router.get("/{notification_id}/alert")
+def get_emergency_notification_alert(
+    notification_id: int,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the exact active panic alert owned by this inbox notification."""
+    response.headers["Cache-Control"] = "no-store"
+    notice = db.scalar(select(Notification).where(
+        Notification.id == notification_id,
+        Notification.recipient_user_id == current_user.id,
+        Notification.category == "emergency",
+        Notification.event_type == "emergency.panic",
+        Notification.deleted_at.is_(None),
+    ))
+    if notice is None:
+        raise HTTPException(status_code=404, detail="Emergency alert not found")
+
+    alert = db.scalar(select(Alert).where(
+        Alert.id == notice.source_id,
+        Alert.kind == "panic",
+    ))
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Emergency alert not found")
+    if alert.status != "active":
+        raise HTTPException(status_code=410, detail="Emergency alert is no longer active")
+
+    accepted_link = db.scalar(select(EmergencyContactLink.id).where(
+        EmergencyContactLink.status == "accepted",
+        or_(
+            (EmergencyContactLink.inviter_user_id == alert.user_id)
+            & (EmergencyContactLink.invitee_user_id == current_user.id),
+            (EmergencyContactLink.invitee_user_id == alert.user_id)
+            & (EmergencyContactLink.inviter_user_id == current_user.id),
+        ),
+    ))
+    if accepted_link is None:
+        raise HTTPException(status_code=404, detail="Emergency alert not found")
+
+    point = db.execute(select(
+        ST_Y(Alert.location.cast(Geometry)).label("latitude"),
+        ST_X(Alert.location.cast(Geometry)).label("longitude"),
+    ).where(Alert.id == alert.id)).one()
+    return {
+        "id": alert.id,
+        "owner_user_id": alert.user_id,
+        "kind": alert.kind,
+        "status": alert.status,
+        "location_label": alert.location_label,
+        "latitude": point.latitude,
+        "longitude": point.longitude,
+        "created_at": alert.created_at.isoformat(),
+    }
 
 
 @router.delete("/{notification_id}", response_model=ManagedCount)

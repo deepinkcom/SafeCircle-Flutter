@@ -254,7 +254,7 @@ class _InviteContactScreenState extends State<InviteContactScreen> {
                           onRefresh: invitation.isLoading ? null : _refresh),
                     const SizedBox(height: 16),
                     const Text(
-                        'An invitation requires acceptance. Connections are not included in emergency alerts yet.'),
+                        'An invitation becomes an emergency-contact connection only after the recipient accepts. While accepted, both people may receive in-app notifications and pushes on registered devices when either triggers a panic alert. Push delivery depends on device registration and notification permission.'),
                   ],
                 ),
               ))),

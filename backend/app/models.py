@@ -53,6 +53,12 @@ class EmergencyContact(Base):
 
 class Alert(Base):
     __tablename__ = "alerts"
+    __table_args__ = (
+        CheckConstraint(
+            "notification_events_status IN ('pending', 'complete')",
+            name="ck_alerts_notification_events_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(
@@ -74,6 +80,12 @@ class Alert(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True,
+    )
+    notification_events_status: Mapped[str] = mapped_column(
+        String(16),
+        default="complete",
+        server_default="complete",
+        nullable=False,
     )
 
 class AlertAcknowledgement(Base):

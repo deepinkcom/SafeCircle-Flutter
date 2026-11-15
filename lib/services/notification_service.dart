@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
 import 'api_failure.dart';
+import '../models/app_notification.dart';
 
 class NotificationService {
   NotificationService({
@@ -136,13 +137,13 @@ class NotificationService {
       return;
     }
     try {
-      await _apiService.fetchNotification(
-          id); // Suppress deleted or inaccessible inbox entries.
+      final inboxNotification = await _apiService.fetchNotification(id);
+      // The authenticated inbox row is authoritative for event type and copy.
       if (owner != _boundUser || validNotification(message) != id) return;
       onInboxChanged?.call();
       if (_shown.length > 512) _shown.clear();
       if (!_shown.add('$owner:$id')) return;
-      await showNotification(message);
+      await showNotification(message, inboxNotification: inboxNotification);
     } catch (_) {
       /* Offline/deleted notifications are not fabricated locally. */
     }
@@ -264,16 +265,28 @@ class NotificationService {
     await androidPlugin?.createNotificationChannel(_channel);
   }
 
-  Future<void> showNotification(RemoteMessage message) async {
+  static ({String title, String body}) notificationCopy(
+      AppNotification? inboxNotification) {
+    if (inboxNotification?.category == NotificationCategory.emergency &&
+        inboxNotification?.eventType == 'emergency.panic') {
+      return (
+        title: 'SafeCircle emergency alert',
+        body: 'An emergency contact has triggered a panic alert.',
+      );
+    }
+    return (title: 'SafeCircle', body: 'You have a SafeCircle update.');
+  }
+
+  Future<void> showNotification(RemoteMessage message,
+      {AppNotification? inboxNotification}) async {
     final id = validNotification(message);
     if (id == null) return;
-    const title = 'SafeCircle';
-    const body = 'You have a SafeCircle update.';
+    final copy = notificationCopy(inboxNotification);
     await _localNotifications.show(
       id: id,
       payload: '${message.data["recipient_uid"]}|$id',
-      title: title,
-      body: body,
+      title: copy.title,
+      body: copy.body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _channel.id,

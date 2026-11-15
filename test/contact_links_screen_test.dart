@@ -15,11 +15,13 @@ import 'support/contact_links_widget_harness.dart';
 ContactLinksScreen screen(
         {Future<void> Function()? signIn,
         Future<void> Function()? profile,
-        Future<void> Function()? invite}) =>
+        Future<void> Function()? invite,
+        int initialView = 0}) =>
     ContactLinksScreen(
         onInvite: invite ?? () async {},
         onSignIn: signIn ?? () async {},
-        onCompleteProfile: profile ?? () async {});
+        onCompleteProfile: profile ?? () async {},
+        initialView: initialView);
 
 void main() {
   testWidgets(
@@ -92,11 +94,14 @@ void main() {
     await pumpContactLinks(tester, api, screen());
     await tester.pumpAndSettle();
     await tapText(tester, 'Received');
-    await tester.tap(find.text('Accept invitation'));
+    await tester.tap(find.text('Review and accept'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('each of you may receive'), findsOneWidget);
+    await tester.tap(find.text('Accept connection'));
     await tester.pump();
     expect(find.text('Pending'), findsOneWidget);
     expect(find.text('Accepted'), findsNothing);
-    await tester.tap(find.text('Accept invitation'));
+    await tester.tap(find.text('Review and accept'));
     await tester.tap(find.text('Reject invitation'));
     expect(api.responses, [(1, ContactInvitationAction.accept)]);
     api.incomingData = [];
@@ -107,6 +112,22 @@ void main() {
     expect(find.text('No received invitations.'), findsOneWidget);
     await tapText(tester, 'Connections');
     expect(find.text('Accepted'), findsOneWidget);
+  });
+
+  testWidgets('acceptance consent defaults to cancellation and explains alerts',
+      (tester) async {
+    final api = ContactLinksFakeApi()..incomingData = [testLink(3, 'pending')];
+    await pumpContactLinks(tester, api, screen());
+    await tester.pumpAndSettle();
+    await tapText(tester, 'Received');
+    await tapText(tester, 'Review and accept');
+    expect(find.text('Accept emergency connection?'), findsOneWidget);
+    expect(find.text('Not now'), findsOneWidget);
+    expect(
+        find.textContaining('Device notification permission must be enabled.'),
+        findsOneWidget);
+    await tapText(tester, 'Not now');
+    expect(api.responses, isEmpty);
   });
 
   testWidgets('reject refreshes lists and never becomes an accepted contact',
@@ -268,10 +289,11 @@ void main() {
     await pumpContactLinks(tester, api, screen());
     await tester.pumpAndSettle();
     await tapText(tester, 'Received');
-    await tapText(tester, 'Accept invitation');
+    await tapText(tester, 'Review and accept');
+    await tapText(tester, 'Accept connection');
     expect(find.textContaining('outcome is uncertain'), findsWidgets);
     final button = tester.widget<FilledButton>(
-        find.widgetWithText(FilledButton, 'Accept invitation'));
+        find.widgetWithText(FilledButton, 'Review and accept'));
     expect(button.onPressed, isNull);
     api.onIncoming = null;
     api.incomingData = [];
@@ -298,23 +320,31 @@ void main() {
     await pumpContactLinks(tester, api, screen());
     await tester.pumpAndSettle();
     await tapText(tester, 'Received');
-    await tapText(tester, 'Accept invitation');
+    await tapText(tester, 'Review and accept');
+    await tapText(tester, 'Accept connection');
     expect(
         find.textContaining(
             'Invitation accepted. Could not refresh all lists.'),
         findsOneWidget);
     expect(api.responses, hasLength(1));
-    expect(find.text('Accept invitation'), findsNothing);
+    expect(find.text('Review and accept'), findsNothing);
   });
 
   testWidgets(
       'narrow layout and large text keep relationship actions accessible',
       (tester) async {
     final api = ContactLinksFakeApi()..incomingData = [testLink(1, 'pending')];
-    await pumpContactLinks(tester, api, screen(),
+    await pumpContactLinks(tester, api, screen(initialView: 1),
         size: const Size(320, 640), textScale: 1.8);
     await tester.pumpAndSettle();
-    await tapText(tester, 'Received');
+    final state = tester
+        .element(find.byType(ContactLinksScreen))
+        .read<ContactLinksState>();
+    await state.loadIncomingInvitations();
+    await tester.pumpAndSettle();
+    expect(state.incoming.items, hasLength(1));
+    await tester.scrollUntilVisible(find.text('Reject invitation'), 100,
+        scrollable: find.byType(Scrollable).last);
     await tester.ensureVisible(find.text('Reject invitation'));
     expect(tester.takeException(), isNull);
     expect(

@@ -15,6 +15,7 @@ const privateMarker = 'synthetic-private-response-or-exception';
 
 Map<String, dynamic> linkJson({String status = 'pending'}) => {
       'id': 7,
+      'owner_user_id': 2,
       'inviter_user_id': 1,
       'invitee_user_id': 2,
       'other_user_id': 2,
@@ -261,7 +262,7 @@ void main() {
     reply([null]),
     reply(['not-an-object']),
     reply([
-      {'id': 7, 'unexpected': privateMarker}
+      {'id': 7, 'owner_user_id': 2, 'unexpected': privateMarker}
     ]),
     http.Response.bytes([0xff, 0xfe], 200),
   ].indexed) {
@@ -423,6 +424,61 @@ void main() {
           ApiFailureKind.validation);
     }
     expect(requests, 0);
+  });
+
+  test('notification alert lookup uses exact authenticated notification path',
+      () async {
+    final api = service((request) async {
+      expect(request.method, 'GET');
+      expect(request.url.path, '/notifications/17/alert');
+      expect(request.headers['Authorization'], 'Bearer $syntheticToken');
+      return reply({
+        'id': 7,
+        'owner_user_id': 2,
+        'kind': 'panic',
+        'status': 'active',
+        'latitude': -33.9,
+        'longitude': 18.4,
+        'location_label': 'Synthetic area',
+        'created_at': '2026-11-08T10:00:00Z',
+      });
+    });
+    expect((await api.fetchEmergencyAlertForNotification(17))['id'], 7);
+    expect(
+        (await failureFrom(() => api.fetchEmergencyAlertForNotification(0)))
+            .kind,
+        ApiFailureKind.validation);
+  });
+
+  test('notification alert lookup rejects malformed or inactive sources',
+      () async {
+    for (final response in [
+      {'id': 7, 'owner_user_id': 2, 'kind': 'nearby', 'status': 'active'},
+      {
+        'id': 7,
+        'owner_user_id': 2,
+        'kind': 'panic',
+        'status': 'resolved',
+        'latitude': 0,
+        'longitude': 0,
+        'created_at': '2026-11-08T10:00:00Z'
+      },
+      {
+        'id': 7,
+        'owner_user_id': 2,
+        'kind': 'panic',
+        'status': 'active',
+        'latitude': 99,
+        'longitude': 0,
+        'created_at': '2026-11-08T10:00:00Z'
+      },
+    ]) {
+      final api = service((_) async => reply(response));
+      expect(
+          (await failureFrom(() => api.fetchEmergencyAlertForNotification(17)))
+              .kind,
+          ApiFailureKind.invalidResponse);
+    }
   });
 
   test('an injected client remains reusable and is not closed by the service',

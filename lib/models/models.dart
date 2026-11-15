@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'profile_photo.dart';
 
@@ -26,14 +25,14 @@ class EmergencyContact {
   });
 
   EmergencyContact copyWith({bool? enabled}) => EmergencyContact(
-    id: id,
-    name: name,
-    relationship: relationship,
-    phone: phone,
-    initials: initials,
-    avatarColor: avatarColor,
-    enabled: enabled ?? this.enabled,
-  );
+        id: id,
+        name: name,
+        relationship: relationship,
+        phone: phone,
+        initials: initials,
+        avatarColor: avatarColor,
+        enabled: enabled ?? this.enabled,
+      );
 }
 
 class AlertEvent {
@@ -54,13 +53,13 @@ class AlertEvent {
   });
 
   AlertEvent copyWith({AlertStatus? status}) => AlertEvent(
-    id: id,
-    kind: kind,
-    title: title,
-    timeLabel: timeLabel,
-    locationLabel: locationLabel,
-    status: status ?? this.status,
-  );
+        id: id,
+        kind: kind,
+        title: title,
+        timeLabel: timeLabel,
+        locationLabel: locationLabel,
+        status: status ?? this.status,
+      );
 }
 
 class UserProfile {
@@ -109,23 +108,25 @@ class UserProfile {
       email: data['email']?.toString() ?? '',
       phone: data['phone']?.toString() ?? '',
       photoStoragePath: data['photoStoragePath'] is String &&
-              ProfilePhotoReference.valid(uid, data['photoStoragePath'] as String)
+              ProfilePhotoReference.valid(
+                  uid, data['photoStoragePath'] as String)
           ? data['photoStoragePath'] as String
           : null,
     );
   }
 
   Map<String, dynamic> toMap() => {
-    'name': name,
-    'city': city,
-    'email': email,
-    'phone': phone,
-    if (photoStoragePath != null) 'photoStoragePath': photoStoragePath,
-  };
+        'name': name,
+        'city': city,
+        'email': email,
+        'phone': phone,
+        if (photoStoragePath != null) 'photoStoragePath': photoStoragePath,
+      };
 }
 
 class NearbyPerson {
   final int id;
+  final int? ownerUserId;
   final String name;
   final String distanceLabel;
   final String locationLabel;
@@ -138,6 +139,7 @@ class NearbyPerson {
 
   const NearbyPerson({
     required this.id,
+    this.ownerUserId,
     required this.name,
     required this.distanceLabel,
     required this.locationLabel,
@@ -150,11 +152,11 @@ class NearbyPerson {
   // Checks whether the emergency has valid GPS coordinates.
   bool get hasValidLocation =>
       latitude != null &&
-          longitude != null &&
-          latitude!.isFinite &&
-          longitude!.isFinite &&
-          latitude! >= -90 &&
-          latitude! <= 90 &&
-          longitude! >= -180 &&
-          longitude! <= 180;
+      longitude != null &&
+      latitude!.isFinite &&
+      longitude!.isFinite &&
+      latitude! >= -90 &&
+      latitude! <= 90 &&
+      longitude! >= -180 &&
+      longitude! <= 180;
 }
