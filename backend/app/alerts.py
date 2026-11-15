@@ -16,7 +16,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user, get_db
+
 from .models import Alert, AlertAcknowledgement, User
+from .notification_events import record_emergency_alert_events
 
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -63,6 +65,18 @@ def create_panic_alert(
     db.add(alert)
     db.commit()
     db.refresh(alert)
+
+    # The panic alert is saved before notification creation.
+    # Notification failures must never undo the saved alert.
+    try:
+        record_emergency_alert_events(
+            db,
+            alert=alert,
+            created_at=alert.created_at,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
 
     return {
         "id": alert.id,

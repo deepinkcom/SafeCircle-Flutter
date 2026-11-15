@@ -86,3 +86,34 @@ def test_test_notification_uses_fake_sender_for_current_users_device(monkeypatch
         )
     ]
     assert "fake-test-token" not in response.text
+
+
+def test_test_notification_returns_404_when_no_android_device(monkeypatch):
+    monkeypatch.setenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "true")
+    fake_db = FakeSession(device=None)
+    client = create_client(fake_db)
+
+    response = client.post("/test-notifications/me")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No registered Android device was found"
+
+
+def test_test_notification_returns_502_when_delivery_fails(monkeypatch):
+    monkeypatch.setenv("SAFECIRCLE_ENABLE_TEST_NOTIFICATIONS", "true")
+    fake_db = FakeSession(device=make_device())
+    client = create_client(fake_db)
+
+    def failing_sender(token, title, body):
+        raise RuntimeError("Simulated Firebase failure")
+
+    monkeypatch.setattr(
+        "app.test_notifications.NotificationService",
+        lambda sender: NotificationService(sender=failing_sender),
+    )
+
+    response = client.post("/test-notifications/me")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Test notification delivery failed"
+

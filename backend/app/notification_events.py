@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .models import Device, EmergencyContactLink, Notification, PushDelivery, User
+from .models import Alert, Device, EmergencyContactLink, Notification, PushDelivery, User
 
 
 CONNECTION_COPY = {
@@ -51,3 +51,88 @@ def record_connection_event(
         db.add(PushDelivery(notification_id=notification.id, device_id=device_id, next_attempt_at=created_at))
     db.flush()
     return notification
+
+
+def record_emergency_alert_events(
+    db: Session,
+    *,
+    alert: Alert,
+    created_at: datetime,
+) -> int:
+    """Create inbox notifications and push jobs for accepted contacts.
+
+    Joins the caller's database transaction. Does not commit or send FCM.
+    """
+    if alert.kind != "panic":
+        raise ValueError("Only panic alerts can generate emergency events")
+
+    links = db.scalars(
+        select(EmergencyContactLink).where(
+            EmergencyContactLink.status == "accepted",
+            or_(
+                EmergencyContactLink.inviter_user_id == alert.user_id,
+                EmergencyContactLink.invitee_user_id == alert.user_id,
+            ),
+        )
+    ).all()
+
+    recipient_ids = {
+        link.invitee_user_id
+        if link.inviter_user_id == alert.user_id
+        else link.inviter_user_id
+        for link in links
+    }
+
+    created_count = 0
+
+    for recipient_id in recipient_ids:
+        recipient_exists = db.scalar(
+            select(User.id).where(User.id == recipient_id)
+        )
+
+        if recipient_exists is None:
+            continue
+
+        existing = db.scalar(
+            select(Notification).where(
+                Notification.recipient_user_id == recipient_id,
+                Notification.category == "emergency",
+                Notification.event_type == "emergency.panic",
+                Notification.source_id == alert.id,
+            )
+        )
+
+        if existing is not None:
+            continue
+
+        notification = Notification(
+            recipient_user_id=recipient_id,
+            category="emergency",
+            event_type="emergency.panic",
+            source_id=alert.id,
+            created_at=created_at,
+            title="Emergency alert",
+            message="An emergency contact has triggered a SafeCircle panic alert.",
+        )
+
+        db.add(notification)
+        db.flush()
+
+        device_ids = db.scalars(
+            select(Device.id).where(Device.user_id == recipient_id)
+        ).all()
+
+        for device_id in device_ids:
+            db.add(
+                PushDelivery(
+                    notification_id=notification.id,
+                    device_id=device_id,
+                    next_attempt_at=created_at,
+                )
+            )
+
+        db.flush()
+        created_count += 1
+
+    return created_count
+
