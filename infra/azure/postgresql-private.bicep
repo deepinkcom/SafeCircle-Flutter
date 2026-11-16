@@ -127,3 +127,13 @@ output postgresDatabaseName string = database.name
 output virtualNetworkId string = vnet.id
 output postgresSubnetId string = postgresSubnet.id
 output containerAppsInfrastructureSubnetId string = containerAppsSubnet.id
+
+@description('Allow the PostGIS extension required by SafeCircle location queries.')
+resource postgisAllowlist 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgres
+  name: 'azure.extensions'
+  properties: {
+    value: 'POSTGIS'
+    source: 'user-override'
+  }
+}
