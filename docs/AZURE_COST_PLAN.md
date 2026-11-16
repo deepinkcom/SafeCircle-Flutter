@@ -2,7 +2,7 @@
 
 Status: planning only. The owner selected **South Africa North** and a
 short-lived, lowest-practical-cost environment for the academic marking/demo,
-with an expected lifetime of **one month (30 days)**.
+with an expected lifetime of **one month (30 days)**. The owner has now chosen **testing/demonstration windows only**, not 24/7 operation.
 This is not a production design or a live Azure quote. No resources are created.
 
 ## Confirmed planning decisions
@@ -38,7 +38,7 @@ Sources:
 | PostgreSQL Flexible Server | Burstable B1ms if available and sufficient; 32 GiB minimum/template starting storage | Stop the server between demo periods where operationally practical; compute billing stops while stopped, but storage/backup charges can remain; server auto-start behaviour and stop limits must be checked |
 | PostgreSQL HA | Disabled | Accepts a single-zone outage risk for a temporary demo; not suitable as a production recommendation |
 | Backup | Minimum supported retention (currently template default 7 days) | Export a separate logical backup before deletion; verify restore if data must be retained |
-| ACR | Basic SKU; admin user disabled | No private endpoint; use managed identity for pulls; delete registry after marking if image is safely retained elsewhere |
+| ACR | Standard SKU in the current Bicep; admin user disabled | No private endpoint; use managed identity for pulls; delete registry after marking if image is safely retained elsewhere |
 | Logs | Minimal diagnostic categories and short retention | Avoid high-volume request/body logging; never log secrets, tokens or location details |
 | Networking | Keep the deployment simple, but preserve TLS and restrict database access | Private VNet architecture is preferred for production but may add complexity/cost. For a temporary assessment deployment, compare private networking with a tightly restricted public-access design before approval; never expose PostgreSQL broadly to the internet |
 
@@ -92,7 +92,7 @@ into the Azure Pricing Calculator and save/export the estimate:
   actual active hours.
 - PostgreSQL Flexible Server: Burstable B1ms (or lowest currently available
   suitable SKU), 32 GiB storage, 7-day backup, active hours and stop periods.
-- ACR Basic: one registry, expected image storage and retention.
+- ACR Standard (current template): one registry, expected image storage and retention. Verify student allowance eligibility; compare Basic if not covered.
 - Monitoring: minimal ingestion and short retention.
 - Networking: quote the selected private or restricted-public design, including
   any NAT gateway, private endpoints and DNS charges.
@@ -123,7 +123,54 @@ Before any resource is created, obtain explicit approval for:
 2. The planned active dates/hours.
 3. Whether the demo needs real Firebase push delivery or only API/database
    demonstration.
-4. Public-restricted vs private PostgreSQL networking.
+4. Private PostgreSQL networking (selected; existing VNet and delegated subnets).
 5. Data retention/export and resource-group deletion date.
 
 No Azure resources are created by this document. No prices here are a quote.
+
+## Selected operating mode (confirmed 2026-11-16)
+
+**Testing and demonstrations only for the 30-day assessment.** This is not an
+always-available emergency service. Do not use it for real emergencies.
+
+- Existing resources already verified: `rg-safecircle-student` in South Africa
+  North and `vnet-safecircle-student` with `snet-postgres` (10.20.1.0/27)
+  and `snet-containerapps` (10.20.2.0/27).
+- **No new Azure resources are authorized.** Compilation and read-only what-if
+  checks are allowed; provisioning, publishing, and database changes are not.
+- The Container Apps template defaults to API min/max 1 and worker min/max 1.
+  **Neither app automatically shuts down between sessions.** Do not describe
+  API scale-to-zero as a way to stop the worker. Explicitly stopping the apps
+  requires a separately approved operational procedure and support verification.
+- During approved test windows, API and worker must both be running, PostgreSQL
+  must be started, and `/health/ready` plus push delivery must be tested before
+  demonstrating panic/emergency notifications.
+- Outside test windows, plan to stop the API and worker together and stop
+  PostgreSQL only after the app workloads have stopped. Confirm Azure CLI support,
+  expected restart latency, and how to restore both apps before scheduling this.
+  Do not treat PostgreSQL stop as free: storage/backups remain billable.
+- ACR, DNS, logging, and other provisioned resources may cost money even when
+  apps and database compute are stopped. Verify any fixed VNet-integrated
+  Container Apps environment charges, including dedicated infrastructure.
+- Before provisioning: record test dates/hours, expected runtime, remaining
+  student credits, subscription-specific free allowance eligibility, a calculator
+  estimate for South Africa North, and an explicit numeric spending ceiling.
+- Delete only the temporary resources after evidence and necessary data are
+  exported; **do not blindly delete the existing resource group or VNet**,
+  because those resources predate the proposed deployment.
+
+### Active-hour planning examples (not Azure quotes)
+
+For API 0.5 vCPU/1 GiB and worker 0.25 vCPU/0.5 GiB,
+the combined allocation is 0.75 vCPU and 1.5 GiB while both run.
+
+| Total active hours over 30 days | vCPU-seconds at full active allocation | GiB-seconds at full active allocation |
+|---:|---:|---:|
+| 10 | 27,000 | 54,000 |
+| 20 | 54,000 | 108,000 |
+| 40 | 108,000 | 216,000 |
+| 720 (comparison only) | 1,944,000 | 3,888,000 |
+
+These are capacity arithmetic, **not billed usage estimates**; Azure may apply
+different active/idle rates and charges, and quotas/free allowances depend on
+subscription eligibility. Keep a separate full-month line for fixed services.
