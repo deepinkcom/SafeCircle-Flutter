@@ -12,7 +12,7 @@ This is not a production design or a live Azure quote. No resources are created.
 - Priority: minimise recurring spend; do not pay for production-grade redundancy
   that is not needed for a short-lived demonstration.
 - Lifecycle: budget for up to 30 days; create only after explicit provisioning
-  approval; delete the resource group at the end of the assessment month after
+  approval; delete only approved demo-created resources at the end of the assessment month after
   required evidence/data has been exported and retained safely.
 - Budget: no numeric monthly ceiling has been supplied yet. Do not deploy until
   the Azure Pricing Calculator estimate and expected active days are reviewed.
@@ -40,7 +40,7 @@ Sources:
 | Backup | Minimum supported retention (currently template default 7 days) | Export a separate logical backup before deletion; verify restore if data must be retained |
 | ACR | Standard SKU in the current Bicep; admin user disabled | No private endpoint; use managed identity for pulls; delete registry after marking if image is safely retained elsewhere |
 | Logs | Minimal diagnostic categories and short retention | Avoid high-volume request/body logging; never log secrets, tokens or location details |
-| Networking | Keep the deployment simple, but preserve TLS and restrict database access | Private VNet architecture is preferred for production but may add complexity/cost. For a temporary assessment deployment, compare private networking with a tightly restricted public-access design before approval; never expose PostgreSQL broadly to the internet |
+| Networking | Existing private VNet with delegated PostgreSQL and Container Apps subnets | Private PostgreSQL networking is selected; verify private DNS resolution and account for any fixed networking/environment charges |
 
 Important: do not reduce security by disabling HTTPS, committing secrets,
 enabling the ACR admin account, or opening PostgreSQL to all IP addresses.
@@ -58,7 +58,7 @@ cheapest safe operational approach may be to:
    configuration supports this without losing readiness or demo reliability.
 5. Export required screenshots, logs with sensitive fields redacted, and a
    database backup if needed.
-6. Delete the temporary resource group after marking and retention approval.
+6. Delete only approved temporary demo resources after marking and retention approval; preserve the pre-existing VNet and resource group.
 
 Do not assume all services can be paused at zero cost. PostgreSQL storage,
 backup retention, ACR storage, Log Analytics, DNS, public IPs, NAT gateways and
@@ -78,7 +78,7 @@ schedule, prepare two calculator cases:
 
 For both cases, include 30 days of database storage and any applicable backup
 retention, and include the full month of any always-on supporting services.
-Use the continuous case as the conservative budget until a schedule is agreed.
+The owner selected 20 total active hours over 30 days. Retain the continuous case only as a stress/upper-bound comparison, not the operating schedule.
 
 ## Cost estimate still required
 
@@ -174,3 +174,28 @@ the combined allocation is 0.75 vCPU and 1.5 GiB while both run.
 These are capacity arithmetic, **not billed usage estimates**; Azure may apply
 different active/idle rates and charges, and quotas/free allowances depend on
 subscription eligibility. Keep a separate full-month line for fixed services.
+
+## Approved planning assumption: 20 total active hours (2026-11-16)
+
+- **Selected total runtime:** approximately **20 hours across 30 days**, not
+  20 hours per day. Actual dates and times remain to be confirmed.
+- **API:** 0.5 vCPU / 1 GiB, max 1 replica.
+- **Push worker:** 0.25 vCPU / 0.5 GiB, 1 replica while testing.
+- **Combined full-active capacity:** 0.75 vCPU / 1.5 GiB.
+- **Twenty-hour allocation:** 54,000 vCPU-seconds and 108,000 GiB-seconds.
+  This is arithmetic, not billed usage or a promise of free service.
+- **PostgreSQL:** budget 20 running hours *only if* a supported stop/start
+  procedure is validated; include 30 days of allocated storage and backups.
+- **ACR Standard:** assume provisioned for the 30-day period unless the
+  subscription-specific student allowance is verified. Compare Basic if not
+  covered; never assume a registry can be paused.
+- **Container Apps:** the Bicep currently keeps API and worker at one replica.
+  **Do not assume 20 hours of billing until a tested stop/start process is
+  approved and implemented.** For financial safety, also price the full
+  720-hour case until that operational control is proven.
+- **No fixed ZAR/USD quote or spending ceiling yet:** a pricing calculator
+  estimate and remaining student credit are required before provisioning.
+- **Readiness check:** this branch's `lib/services/api_service.dart` already
+  contains `String.fromEnvironment('SAFECIRCLE_API_BASE_URL', ...)`. Any
+  earlier note saying it is absent is stale; tests and a release build with
+  the HTTPS URL still need verification.
