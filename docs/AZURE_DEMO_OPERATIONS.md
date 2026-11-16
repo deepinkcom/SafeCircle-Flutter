@@ -27,6 +27,29 @@ operational commands until deployment and operating schedule are approved.
 6. Confirm a repeatable, secure secret provisioning method.
 7. Obtain explicit approval for **each** provisioning/publishing action.
 
+## Verified local CLI capabilities (2026-11-16)
+
+The owner confirmed the installed Azure CLI provides these commands via
+read-only `--help` checks:
+
+- `az containerapp revision list --name <app> --resource-group <rg> --all`
+- `az containerapp revision deactivate --revision <revision> --resource-group <rg>`
+- `az containerapp revision activate --revision <revision> --resource-group <rg>`
+
+These are **future operational commands**, not yet tested on deployed apps.
+Revision names must be obtained from the actual deployed resources. The
+templates currently use single-revision mode and fixed revision suffix
+`azure`; validate revision lifecycle and reactivation before relying on
+20-hour consumption billing. Never execute activate/deactivate until
+deployment and operating changes are explicitly approved.
+
+**Stop sequence (future, conditional):** prevent new synthetic test alerts,
+verify pending work is drained, deactivate worker and API revisions, verify
+no running replicas, then stop PostgreSQL. **Start sequence:** start PostgreSQL,
+wait for readiness, activate API and worker, verify both workloads and end-to-end
+FCM delivery. PostgreSQL may restart automatically after its stop-duration limit;
+check state regularly. ACR, storage, DNS and environment charges may continue.
+
 ## Approved demo window: start checklist (future)
 
 - Confirm authorization and a budget/credit check.
