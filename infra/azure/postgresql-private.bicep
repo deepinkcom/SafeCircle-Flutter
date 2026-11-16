@@ -48,46 +48,18 @@ param virtualNetworkName string = 'vnet-safecircle-student'
 @description('Private DNS zone name for PostgreSQL Flexible Server.')
 param privateDnsZoneName string = 'safecircle.private.postgres.database.azure.com'
 
-resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
   name: virtualNetworkName
-  location: location
-  properties: {
-    addressSpace: {
-      addressPrefixes: [
-        '10.20.0.0/16'
-      ]
-    }
-    subnets: [
-      {
-        name: 'snet-postgres'
-        properties: {
-          addressPrefix: '10.20.1.0/27'
-          delegations: [
-            {
-              name: 'postgres-flexible-server'
-              properties: {
-                serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers'
-              }
-            }
-          ]
-        }
-      }
-      {
-        name: 'snet-containerapps'
-        properties: {
-          addressPrefix: '10.20.2.0/27'
-          delegations: [
-            {
-              name: 'container-apps'
-              properties: {
-                serviceName: 'Microsoft.App/environments'
-              }
-            }
-          ]
-        }
-      }
-    ]
-  }
+}
+
+resource postgresSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  parent: vnet
+  name: 'snet-postgres'
+}
+
+resource containerAppsSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  parent: vnet
+  name: 'snet-containerapps'
 }
 
 resource postgresPrivateDns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
@@ -128,7 +100,7 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
       geoRedundantBackup: 'Disabled'
     }
     network: {
-      delegatedSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetworkName, 'snet-postgres-delegated')
+      delegatedSubnetResourceId: postgresSubnet.id
       privateDnsZoneArmResourceId: postgresPrivateDns.id
       publicNetworkAccess: 'Disabled'
     }
@@ -153,5 +125,5 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-0
 output postgresServerFqdn string = postgres.properties.fullyQualifiedDomainName
 output postgresDatabaseName string = database.name
 output virtualNetworkId string = vnet.id
-output postgresSubnetId string = resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetworkName, 'snet-postgres-delegated')
-output containerAppsInfrastructureSubnetId string = resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetworkName, 'snet-container-apps-infrastructure')
+output postgresSubnetId string = postgresSubnet.id
+output containerAppsInfrastructureSubnetId string = containerAppsSubnet.id
