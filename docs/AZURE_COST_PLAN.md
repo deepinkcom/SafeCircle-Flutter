@@ -199,3 +199,24 @@ subscription eligibility. Keep a separate full-month line for fixed services.
   contains `String.fromEnvironment('SAFECIRCLE_API_BASE_URL', ...)`. Any
   earlier note saying it is absent is stale; tests and a release build with
   the HTTPS URL still need verification.
+
+## Read-only PostgreSQL quota confirmation (2026-11-16)
+
+The owner ran Azure REST GET against
+`Microsoft.DBforPostgreSQL/locations/southafricanorth/resourceType/flexibleServers/usages`
+(API version `2025-08-01`) for the Azure for Students subscription.
+
+| Reported quota | Current usage | Limit | Available |
+|---|---:|---:|---:|
+| `cores` | 0 | 16 | 16 |
+| `standardBSFamily` | 0 | 8 | 8 |
+
+The proposed `Standard_B1ms` uses one Burstable vCore, so the reported
+quota is sufficient **on paper**. SKU listing and quota do not establish
+regional capacity, deployability, pricing or free-credit eligibility.
+No PostgreSQL server currently exists in `rg-safecircle-student`.
+
+Next gates: confirm remaining student credit and numerical spend ceiling,
+current South Africa North calculator estimate (20-hour active case plus
+30-day fixed costs and a 720-hour fallback until shutdown is proven),
+and deployment/application readiness. No Azure resources authorized.
