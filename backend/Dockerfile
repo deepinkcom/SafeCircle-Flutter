@@ -14,8 +14,10 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
+COPY scripts/bootstrap_postgres.sql ./scripts/bootstrap_postgres.sql
 
 EXPOSE 8000
 
 # Run schema migrations as a separately approved one-off task, never per replica.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+
