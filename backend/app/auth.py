@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -21,21 +22,32 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def initialize_firebase():
     if not firebase_admin._apps:
+        service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
         service_account_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
 
-        if not service_account_path:
+        if service_account_json:
+            try:
+                service_account_info = json.loads(service_account_json)
+            except (TypeError, json.JSONDecodeError) as error:
+                raise RuntimeError(
+                    "FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON"
+                ) from error
+            if not isinstance(service_account_info, dict):
+                raise RuntimeError(
+                    "FIREBASE_SERVICE_ACCOUNT_JSON must contain a JSON object"
+                )
+            credential = credentials.Certificate(service_account_info)
+        elif service_account_path:
+            path = Path(service_account_path).expanduser()
+            if not path.is_file():
+                raise RuntimeError(
+                    "Firebase service-account file was not found"
+                )
+            credential = credentials.Certificate(str(path))
+        else:
             raise RuntimeError(
-                "FIREBASE_SERVICE_ACCOUNT_PATH is not configured"
+                "Configure FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_SERVICE_ACCOUNT_PATH"
             )
-
-        path = Path(service_account_path).expanduser()
-
-        if not path.is_file():
-            raise RuntimeError(
-                "Firebase service-account file was not found"
-            )
-
-        credential = credentials.Certificate(str(path))
         firebase_admin.initialize_app(
             credential,
             {"projectId": "deepinkapp-124a6"},

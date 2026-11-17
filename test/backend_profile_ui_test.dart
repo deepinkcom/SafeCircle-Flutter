@@ -25,6 +25,14 @@ void main() {
     expect(find.textContaining('Contact support; no accounts were relinked.'),
         findsWidgets);
   });
+  testWidgets('Profile no longer shows Help & Support', (tester) async {
+    await ui.boot(tester, NotificationsFakeApi());
+    await tapText(tester, 'Profile');
+    expect(find.text('Help & Support'), findsNothing);
+    expect(find.text('Personal Details'), findsOneWidget);
+    expect(find.text('My Connections'), findsOneWidget);
+    expect(find.text('Log Out'), findsOneWidget);
+  });
   testWidgets(
       'restored missing profile is guided from Home to Personal Details',
       (tester) async {

@@ -1,10 +1,19 @@
 import 'package:geocoding/geocoding.dart' as geocoding;
 import 'package:geolocator/geolocator.dart';
+import 'dart:async';
 
 enum LocationAccess { granted, denied, deniedForever, servicesDisabled }
 
 /// Handles access to the device's GPS location.
 class LocationService {
+  Stream<({double lat, double lng})> watchLocation() =>
+      Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 10,
+        ),
+      ).map((position) => (lat: position.latitude, lng: position.longitude));
+
   /// Permission-only onboarding; does not request coordinates or send data.
   Future<LocationAccess> requestPermission() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -57,7 +66,7 @@ class LocationService {
 
     final Position position = await Geolocator.getCurrentPosition(
       desiredAccuracy: LocationAccuracy.high,
-    );
+    ).timeout(const Duration(seconds: 20));
 
     return (
       lat: position.latitude,
@@ -70,10 +79,9 @@ class LocationService {
     required double lat,
     required double lng,
   }) async {
-    final placemarks = await geocoding.Geocoding().placemarkFromCoordinates(
-      lat,
-      lng,
-    );
+    final placemarks = await geocoding.Geocoding()
+        .placemarkFromCoordinates(lat, lng)
+        .timeout(const Duration(seconds: 8));
 
     if (placemarks.isEmpty) {
       return '$lat, $lng';

@@ -5,7 +5,7 @@ from firebase_admin import messaging
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
-from app.models import Alert, Device, EmergencyContactLink, Notification, PushDelivery
+from app.models import Alert, Device, DeviceInstallation, EmergencyContactLink, Notification, PushDelivery
 from app.push_worker import _claim, _deliver_claim, deliver_one
 from test_contact_links import client, database, headers, invite, respond
 from test_notifications import inbox, get_page, events
@@ -339,3 +339,237 @@ def test_device_removal_is_authenticated_and_owner_scoped(inbox, database):
     assert inbox.request('DELETE', '/devices', headers=headers(2), json=body).status_code == 200
     with Session(database) as db:
         assert db.scalar(select(Device)) is None
+    # Repeating cleanup for the already-removed token is safe and idempotent.
+    repeated = inbox.request('DELETE', '/devices', headers=headers(2), json=body)
+    assert repeated.status_code == 200
+    assert repeated.json() == {'success': True}
+    with Session(database) as db:
+        assert db.scalar(select(Device)) is None
+
+
+def test_legacy_cleanup_status_is_auth_only_and_returns_no_registration_details(inbox, database):
+    from app.devices import router as devices_router
+
+    inbox.app.include_router(devices_router)
+    device(database, 2, 'synthetic-legacy-status-token')
+    assert inbox.get('/devices/cleanup-status').status_code == 401
+    status = inbox.get('/devices/cleanup-status', headers=headers(2))
+    assert status.status_code == 200
+    assert status.json() == {'has_registrations': True}
+    assert 'synthetic-legacy-status-token' not in status.text
+
+
+def test_installation_cleanup_is_authenticated_idempotent_and_scoped(inbox, database):
+    from app.devices import router as devices_router
+
+    inbox.app.include_router(devices_router)
+    install_a, install_b = 'a' * 64, 'b' * 64
+    invite(inbox)
+    with Session(database) as db:
+        db.add_all([
+            DeviceInstallation(installation_id=install_a, owner_user_id=2),
+            DeviceInstallation(installation_id=install_b, owner_user_id=2),
+            Device(user_id=2, fcm_token='synthetic-phone-one', platform='android', installation_id=install_a),
+            Device(user_id=2, fcm_token='synthetic-phone-two', platform='android', installation_id=install_b),
+        ])
+        db.commit()
+    with Session(database) as db:
+        rows = db.scalars(select(Device).order_by(Device.id)).all()
+        # Give each installation a pending delivery for the same inbox item.
+        notice = db.scalar(select(Notification).where(Notification.recipient_user_id == 2))
+        jobs = [PushDelivery(notification_id=notice.id, device_id=row.id) for row in rows]
+        db.add_all(jobs)
+        db.commit()
+        job_ids = [job.id for job in jobs]
+
+    body = {'installation_id': install_a}
+    assert inbox.request('DELETE', '/devices/installation', json=body).status_code == 401
+    assert inbox.request('DELETE', '/devices/installation', headers=headers(1), json=body).status_code == 409
+    response = inbox.request('DELETE', '/devices/installation', headers=headers(2), json=body)
+    assert response.status_code == 200
+    assert response.json() == {
+        'success': True,
+        'revoked_count': 1,
+        'installation_registrations_remain': False,
+        'unattributed_legacy_registrations_remain': False,
+    }
+    again = inbox.request('DELETE', '/devices/installation', headers=headers(2), json=body)
+    assert again.status_code == 200 and again.json()['revoked_count'] == 0
+    with Session(database) as db:
+        remaining = db.scalars(select(Device)).all()
+        assert len(remaining) == 1 and remaining[0].installation_id == install_b
+        by_id = [db.get(PushDelivery, job_id) for job_id in job_ids]
+        assert by_id[0].status == 'cancelled' and by_id[0].device_id is None
+        assert by_id[1].status == 'pending' and by_id[1].device_id == remaining[0].id
+    switched = inbox.post(
+        '/devices', headers=headers(1),
+        json={'fcm_token': 'synthetic-phone-one', 'platform': 'android', 'installation_id': install_a},
+    )
+    assert switched.status_code == 200
+    calls = []
+    with Session(database) as db:
+        replacement = db.scalar(select(Device).where(Device.fcm_token == 'synthetic-phone-one'))
+        assert replacement.user_id == 1
+        assert db.get(PushDelivery, job_ids[0]).status == 'cancelled'
+        db.get(PushDelivery, job_ids[1]).status = 'cancelled'
+        db.commit()
+        assert not deliver_one(db, lambda *args: calls.append(args))
+    assert calls == []
+
+
+def test_installation_cleanup_reconciles_only_presented_legacy_token(inbox, database):
+    from app.devices import router as devices_router
+
+    inbox.app.include_router(devices_router)
+    install_a, install_b = 'c' * 64, 'd' * 64
+    with Session(database) as db:
+        db.add_all([
+            DeviceInstallation(installation_id=install_a, owner_user_id=2),
+            DeviceInstallation(installation_id=install_b, owner_user_id=2),
+            Device(user_id=2, fcm_token='synthetic-legacy-current', platform='android'),
+            Device(user_id=2, fcm_token='synthetic-legacy-other-phone', platform='android'),
+        ])
+        db.commit()
+    response = inbox.request(
+        'DELETE', '/devices/installation', headers=headers(2),
+        json={'installation_id': install_a, 'fcm_token': 'synthetic-legacy-current'},
+    )
+    assert response.status_code == 200
+    assert response.json()['revoked_count'] == 1
+    assert response.json()['installation_registrations_remain'] is False
+    assert response.json()['unattributed_legacy_registrations_remain'] is True
+    with Session(database) as db:
+        tokens = {row.fcm_token: row.installation_id for row in db.scalars(select(Device)).all()}
+        assert tokens == {'synthetic-legacy-other-phone': None}
+        assert db.get(DeviceInstallation, install_a).owner_user_id is None
+    switched = inbox.post(
+        '/devices', headers=headers(1),
+        json={'fcm_token': 'synthetic-new-account-token', 'platform': 'android', 'installation_id': install_a},
+    )
+    assert switched.status_code == 200
+
+
+def test_installation_revocation_cancels_queued_emergency_push(inbox, database):
+    from app.devices import router as devices_router
+
+    inbox.app.include_router(devices_router)
+    install = 'f' * 64
+    with Session(database) as db:
+        db.add(DeviceInstallation(installation_id=install, owner_user_id=2))
+        target = Device(
+            user_id=2, fcm_token='synthetic-emergency-phone', platform='android',
+            installation_id=install,
+        )
+        db.add(target)
+        db.flush()
+        notice = Notification(
+            recipient_user_id=2, category='emergency',
+            event_type='emergency.panic', source_id=812,
+            title='SafeCircle emergency alert', message='Test event.',
+        )
+        db.add(notice)
+        db.flush()
+        job = PushDelivery(notification_id=notice.id, device_id=target.id)
+        db.add(job)
+        db.commit()
+        job_id, notice_id = job.id, notice.id
+
+    response = inbox.request(
+        'DELETE', '/devices/installation', headers=headers(2),
+        json={'installation_id': install},
+    )
+    assert response.status_code == 200
+    calls = []
+    with Session(database) as db:
+        assert not deliver_one(db, lambda *args: calls.append(args))
+        assert db.get(PushDelivery, job_id).status == 'cancelled'
+        assert db.get(PushDelivery, job_id).device_id is None
+        assert db.get(Notification, notice_id).deleted_at is None
+    assert calls == []
+
+
+def test_token_rotation_keeps_and_revokes_all_installation_tokens(inbox, database):
+    from app.devices import router as devices_router
+
+    inbox.app.include_router(devices_router)
+    install = '9' * 64
+    for token in ('synthetic-rotated-token-old', 'synthetic-rotated-token-current'):
+        response = inbox.post(
+            '/devices', headers=headers(2),
+            json={'fcm_token': token, 'platform': 'android', 'installation_id': install},
+        )
+        assert response.status_code == 200
+
+    with Session(database) as db:
+        rows = db.scalars(select(Device).where(Device.installation_id == install)).all()
+        assert {row.fcm_token for row in rows} == {
+            'synthetic-rotated-token-old', 'synthetic-rotated-token-current'
+        }
+
+    cleanup = inbox.request(
+        'DELETE', '/devices/installation', headers=headers(2),
+        json={'installation_id': install},
+    )
+    assert cleanup.status_code == 200
+    assert cleanup.json()['revoked_count'] == 2
+    with Session(database) as db:
+        assert db.scalars(select(Device).where(Device.installation_id == install)).all() == []
+
+
+def test_installation_cleanup_rejects_foreign_token_without_revealing_it(inbox, database):
+    from app.devices import router as devices_router
+
+    inbox.app.include_router(devices_router)
+    install = 'e' * 64
+    device(database, 1, 'synthetic-foreign-token')
+    response = inbox.request(
+        'DELETE', '/devices/installation', headers=headers(2),
+        json={'installation_id': install, 'fcm_token': 'synthetic-foreign-token'},
+    )
+    assert response.status_code == 409
+    assert 'synthetic-foreign-token' not in response.text
+    with Session(database) as db:
+        assert db.scalar(select(Device).where(Device.fcm_token == 'synthetic-foreign-token')) is not None
+
+
+def test_reused_fcm_token_cannot_deliver_old_account_inbox_to_new_account(inbox, database):
+    from app.devices import router as devices_router
+
+    inbox.app.include_router(devices_router)
+    token = 'synthetic-account-switch-token'
+    device(database, 2, token)
+    with Session(database) as db:
+        old_device = db.scalar(select(Device).where(Device.fcm_token == token))
+        notice = Notification(
+            recipient_user_id=2,
+            category='connection',
+            event_type='connection.invited',
+            source_id=71,
+            title='Synthetic invitation',
+            message='A synthetic account received an invitation.',
+        )
+        db.add(notice)
+        db.flush()
+        job = PushDelivery(notification_id=notice.id, device_id=old_device.id)
+        db.add(job)
+        db.commit()
+        notice_id, job_id = notice.id, job.id
+
+    removed = inbox.request(
+        'DELETE', '/devices', headers=headers(2), json={'fcm_token': token}
+    )
+    assert removed.status_code == 200
+    registered = inbox.post(
+        '/devices', headers=headers(1),
+        json={'fcm_token': token, 'platform': 'android'},
+    )
+    assert registered.status_code == 200
+
+    with Session(database) as db:
+        replacement = db.scalar(select(Device).where(Device.fcm_token == token))
+        old_job = db.get(PushDelivery, job_id)
+        old_notice = db.get(Notification, notice_id)
+        assert replacement.user_id == 1
+        assert old_job.status == 'cancelled'
+        assert old_job.device_id is None
+        assert old_notice.recipient_user_id == 2

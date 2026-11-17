@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import (
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from .auth import get_current_user, get_db
 
 from .models import Alert, AlertAcknowledgement, EmergencyContactLink, User
-from .notification_events import record_emergency_alert_events
+from .notification_events import record_emergency_acknowledgement_event, record_emergency_alert_events
 
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -30,6 +30,11 @@ class PanicAlertCreate(BaseModel):
     latitude: float
     longitude: float
     location_label: str | None = None
+
+
+class PanicLocationUpdate(BaseModel):
+    latitude: float
+    longitude: float
 
 
 @router.post("/panic")
@@ -147,6 +152,72 @@ def resolve_alert(
     }
 
 
+@router.post("/{alert_id}/location")
+def update_panic_location(
+    alert_id: int,
+    location_data: PanicLocationUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update an active panic point; only its owner may publish coordinates."""
+    if not -90 <= location_data.latitude <= 90 or not -180 <= location_data.longitude <= 180:
+        raise HTTPException(status_code=422, detail="Invalid coordinates")
+    alert = db.scalar(select(Alert).where(
+        Alert.id == alert_id,
+        Alert.user_id == current_user.id,
+        Alert.kind == "panic",
+        Alert.status == "active",
+    ).with_for_update())
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Active alert not found")
+    alert.location = WKTElement(
+        f"POINT({location_data.longitude} {location_data.latitude})", srid=4326
+    )
+    db.commit()
+    return {"id": alert.id, "status": alert.status}
+
+
+@router.get("/{alert_id}/location")
+def get_panic_location(
+    alert_id: int,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    response.headers["Cache-Control"] = "no-store"
+    alert = db.scalar(select(Alert).where(
+        Alert.id == alert_id,
+        Alert.kind == "panic",
+        Alert.status == "active",
+    ))
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Active alert not found")
+    if alert.user_id != current_user.id:
+        accepted = db.scalar(select(EmergencyContactLink.id).where(
+            EmergencyContactLink.status == "accepted",
+            or_(
+                (EmergencyContactLink.inviter_user_id == alert.user_id)
+                & (EmergencyContactLink.invitee_user_id == current_user.id),
+                (EmergencyContactLink.invitee_user_id == alert.user_id)
+                & (EmergencyContactLink.inviter_user_id == current_user.id),
+            ),
+        ))
+        if accepted is None:
+            raise HTTPException(status_code=404, detail="Active alert not found")
+    point = db.execute(select(
+        ST_Y(Alert.location.cast(Geometry)).label("latitude"),
+        ST_X(Alert.location.cast(Geometry)).label("longitude"),
+    ).where(Alert.id == alert.id)).one()
+    return {
+        "id": alert.id,
+        "owner_user_id": alert.user_id,
+        "status": alert.status,
+        "latitude": point.latitude,
+        "longitude": point.longitude,
+        "created_at": alert.created_at.isoformat(),
+    }
+
+
 @router.post("/{alert_id}/acknowledge")
 def acknowledge_alert(
     alert_id: int,
@@ -201,6 +272,11 @@ def acknowledge_alert(
         db.add(acknowledgement)
 
         try:
+            db.flush()
+            record_emergency_acknowledgement_event(
+                db, alert=alert, acknowledgement=acknowledgement,
+                responder=current_user, created_at=acknowledgement.created_at,
+            )
             db.commit()
             db.refresh(acknowledgement)
         except IntegrityError:
@@ -219,6 +295,17 @@ def acknowledge_alert(
                     status_code=409,
                     detail="Could not record the acknowledgement",
                 )
+            record_emergency_acknowledgement_event(
+                db, alert=alert, acknowledgement=acknowledgement,
+                responder=current_user, created_at=acknowledgement.created_at,
+            )
+            db.commit()
+    else:
+        record_emergency_acknowledgement_event(
+            db, alert=alert, acknowledgement=acknowledgement,
+            responder=current_user, created_at=acknowledgement.created_at,
+        )
+        db.commit()
 
     return {
         "id": acknowledgement.id,
@@ -277,7 +364,9 @@ def get_alert_history(
             "alert_id": alert.id,
             "kind": "nearby_received",
             "status": acknowledgement.status,
-            "location_label": alert.location_label,
+            # A prior acknowledgement is retained as activity, but does not
+            # preserve location access after a connection is removed.
+            "location_label": None,
             "created_at": acknowledgement.created_at.isoformat(),
             "resolved_at": None,
         }
@@ -293,12 +382,14 @@ def get_alert_history(
 
 @router.get("/nearby")
 def get_nearby_alerts(
+    response: Response,
     lat: float = Query(ge=-90, le=90),
     lng: float = Query(ge=-180, le=180),
     radius_km: float = Query(default=1, gt=0, le=50),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    response.headers["Cache-Control"] = "no-store"
     search_point = WKTElement(
         f"POINT({lng} {lat})",
         srid=4326,
@@ -337,16 +428,41 @@ def get_nearby_alerts(
 
     results = db.execute(statement).all()
 
+    accepted_owner_ids = set()
+    alert_owner_ids = {alert.user_id for alert, *_ in results}
+    if alert_owner_ids:
+        accepted_owner_ids = set(db.scalars(
+            select(EmergencyContactLink.inviter_user_id).where(
+                EmergencyContactLink.status == "accepted",
+                EmergencyContactLink.invitee_user_id == current_user.id,
+                EmergencyContactLink.inviter_user_id.in_(alert_owner_ids),
+            )
+        ).all())
+        accepted_owner_ids.update(db.scalars(
+            select(EmergencyContactLink.invitee_user_id).where(
+                EmergencyContactLink.status == "accepted",
+                EmergencyContactLink.inviter_user_id == current_user.id,
+                EmergencyContactLink.invitee_user_id.in_(alert_owner_ids),
+            )
+        ).all())
+
     return [
         {
             "id": alert.id,
             "owner_user_id": alert.user_id,
             "kind": alert.kind,
             "status": alert.status,
-            "location_label": alert.location_label,
-            "distance_km": round(distance_meters / 1000, 3),
-            "latitude": latitude,
-            "longitude": longitude,
+            "location_label": (
+                alert.location_label
+                if alert.user_id in accepted_owner_ids
+                else None
+            ),
+            "distance_km": round(
+                distance_meters / 1000,
+                3 if alert.user_id in accepted_owner_ids else 1,
+            ),
+            "latitude": latitude if alert.user_id in accepted_owner_ids else None,
+            "longitude": longitude if alert.user_id in accepted_owner_ids else None,
             "created_at": alert.created_at.isoformat(),
         }
         for alert, distance_meters, latitude, longitude in results

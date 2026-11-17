@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -17,21 +19,21 @@ Future<void> firebaseMessagingBackgroundHandler(
   );
 
   debugPrint(
-    'FCM: Background message received: ${message.messageId}',
+    'FCM: Background message received.',
   );
 }
 
 Future<void> main() async {
-WidgetsFlutterBinding.ensureInitialized();
-await _initializeFirebase();
+  WidgetsFlutterBinding.ensureInitialized();
+  await _initializeFirebase();
 
-if (FirebaseBootstrap.isReady) {
-  FirebaseMessaging.onBackgroundMessage(
-    firebaseMessagingBackgroundHandler,
-  );
-}
+  if (FirebaseBootstrap.isReady) {
+    FirebaseMessaging.onBackgroundMessage(
+      firebaseMessagingBackgroundHandler,
+    );
+  }
 
-runApp(
+  runApp(
     ChangeNotifierProvider(
       create: (_) => AppState(),
       child: const SafeCircleApp(),
@@ -40,6 +42,9 @@ runApp(
 }
 
 Future<void> _initializeFirebase() async {
+  FirebaseBootstrap.isReady = false;
+  debugPrint(jsonEncode(
+      {'event': 'safe_circle_firebase_initialization', 'stage': 'started'}));
   try {
     final options = DefaultFirebaseOptions.currentPlatform;
     final configured = !options.apiKey.startsWith('REPLACE') &&
@@ -53,8 +58,16 @@ Future<void> _initializeFirebase() async {
     }
     await Firebase.initializeApp(options: options);
     FirebaseBootstrap.isReady = true;
-  } catch (error, stackTrace) {
-    debugPrint('Firebase initialization skipped: $error');
-    debugPrint('$stackTrace');
+    debugPrint(jsonEncode({
+      'event': 'safe_circle_firebase_initialization',
+      'stage': 'succeeded'
+    }));
+  } catch (error) {
+    debugPrint(jsonEncode({
+      'event': 'safe_circle_firebase_initialization',
+      'stage': 'failed',
+      if (error is FirebaseException) 'firebase_exception_code': error.code,
+      'exception_type': error.runtimeType.toString(),
+    }));
   }
 }

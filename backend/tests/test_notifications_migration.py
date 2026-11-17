@@ -18,7 +18,7 @@ from test_contact_links_migration import insert_link, migration_db, snapshot
 REVISION = "b6e9c2d4f810"
 PARENT = "8c2f7d1a6b90"
 SCHEMA_HEAD = "d9a4f6b2c730"
-CURRENT_HEAD = "e17d6a10bc25"
+CURRENT_HEAD = "a91b8c7d6e5f"
 
 
 def notification(**changes):

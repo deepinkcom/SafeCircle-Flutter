@@ -18,6 +18,8 @@ dependencies:
   cloud_firestore: ^7.0.0
   firebase_storage: ^14.0.1
   image_picker: ^1.2.4
+  flutter_secure_storage: ^10.3.4
+  url_launcher: ^6.3.2
 
   # --- Not enabled yet: wire these in once Maps / messaging are ready ---
   # google_maps_flutter: ^2.6.0   # real map tiles (needs a Google Maps API key)

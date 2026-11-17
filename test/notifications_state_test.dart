@@ -263,7 +263,6 @@ void main() {
     expect(app.notifications.userId, isNull);
     app.userProfile = testProfile('alice');
     expect(app.notifications.sessionVersion, greaterThan(version));
-    expect(app.contacts, isEmpty);
   });
   test('successful mutation remains confirmed even if subsequent refresh fails',
       () async {

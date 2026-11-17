@@ -16,6 +16,26 @@ import 'user_repository.dart';
 /// Firestore is the sole photo-reference authority; Storage contains private bytes.
 /// No public download URLs, disk image cache, backend mutations or FCM calls.
 class ProfilePhotoService {
+  static String storageFailureMessage(String code) => switch (code) {
+        'unauthenticated' => 'Sign in again before changing your picture.',
+        'unauthorized' ||
+        'permission-denied' =>
+          'Photo access was denied. Ask the administrator to verify the private photo rules.',
+        'bucket-not-found' ||
+        'project-not-found' =>
+          'Profile-picture storage is not configured yet.',
+        'quota-exceeded' =>
+          'Profile-picture storage quota is unavailable. Contact the administrator; retrying will not resolve the quota.',
+        'retry-limit-exceeded' =>
+          'The photo transfer timed out. Check the connection and retry.',
+        'invalid-checksum' =>
+          'The photo transfer was incomplete. Select the picture again and retry.',
+        'object-not-found' =>
+          'The saved picture is unavailable. Refresh your profile.',
+        'canceled' || 'cancelled' => 'The picture operation was cancelled.',
+        _ =>
+          'Photo storage could not complete the request. Retry or ask the administrator to check the diagnostic code.',
+      };
   ProfilePhotoService({
     FirebaseAuth? auth,
     FirebaseStorage? storage,
@@ -111,33 +131,24 @@ class ProfilePhotoService {
   }
 
   ProfilePhotoFailure _safeFailure(Object error,
-      {bool requiresRefresh = false}) {
+      {bool requiresRefresh = false, String stage = 'photo_operation'}) {
     if (error is ProfilePhotoFailure && !requiresRefresh) return error;
     var message = 'The picture could not be processed. Please try again.';
     if (error is FirebaseException) {
-      switch (error.code) {
-        case 'unauthenticated':
-        case 'unauthorized':
-        case 'permission-denied':
-          message =
-              'Photo access was denied. Check your sign-in and storage configuration.';
-          break;
-        case 'bucket-not-found':
-        case 'project-not-found':
-          message = 'Profile-picture storage is not configured yet.';
-          break;
-        case 'canceled':
-        case 'cancelled':
-          message = 'The picture operation was cancelled.';
-          break;
-        default:
-          message =
-              'Photo storage is unavailable. Check your connection and retry.';
-          break;
-      }
+      message = storageFailureMessage(error.code);
+      // Firebase's raw exception message may contain backend details. Keep
+      // release diagnostics to the stable error code and user-safe copy.
+      debugPrint(
+        'Profile photo Firebase operation failed '
+        '(stage: $stage, code: ${error.code}): $message',
+      );
     } else if (error is PlatformException) {
       message =
           'Camera or photo access is unavailable. Check device permissions and try again.';
+      debugPrint(
+        'Profile photo platform operation failed '
+        '(code: ${error.code}): $message',
+      );
     }
     return ProfilePhotoFailure(
       requiresRefresh
@@ -206,7 +217,7 @@ class ProfilePhotoService {
         input.fillRange(0, input.length, 0);
       }
     } catch (error) {
-      throw _safeFailure(error);
+      throw _safeFailure(error, stage: 'image_selection');
     } finally {
       _busy = false;
     }
@@ -290,10 +301,11 @@ class ProfilePhotoService {
       } catch (error) {
         _guard(uid, epoch, isCurrent);
         return ProfilePhotoResult(
-            path: path, warning: _safeFailure(error).message);
+            path: path,
+            warning: _safeFailure(error, stage: 'image_download').message);
       }
     } catch (error) {
-      throw _safeFailure(error);
+      throw _safeFailure(error, stage: 'profile_reference_read');
     }
   }
 
@@ -389,7 +401,9 @@ class ProfilePhotoService {
     } catch (error) {
       // Never delete an uploaded object after an ambiguous Firestore commit: it
       // might be the current photo. Unreferenced leftovers need reviewed cleanup.
-      throw _safeFailure(error, requiresRefresh: committing);
+      throw _safeFailure(error,
+          requiresRefresh: committing,
+          stage: committing ? 'profile_reference_commit' : 'image_upload');
     } finally {
       await progress?.cancel();
       if (uploadBytes != null) uploadBytes.fillRange(0, uploadBytes.length, 0);

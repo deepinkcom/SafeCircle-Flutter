@@ -15,12 +15,18 @@ class ApiService {
   /// closed per request, so existing callers need no new disposal lifecycle.
   /// Production authentication continues to use the current Firebase user.
   ApiService({
-    this.baseUrl = 'http://192.168.0.28:8000',
+    this.baseUrl = const String.fromEnvironment(
+      'SAFECIRCLE_API_BASE_URL',
+      defaultValue: 'http://192.168.0.28:8000',
+    ),
     http.Client? client,
     Future<String?> Function()? tokenProvider,
+    Future<String?> Function()? forceRefreshTokenProvider,
     this.requestTimeout = const Duration(seconds: 20),
   })  : _client = client,
-        _tokenProvider = tokenProvider ?? _firebaseIdToken {
+        _tokenProvider = tokenProvider ?? _firebaseIdToken,
+        _forceRefreshTokenProvider =
+            forceRefreshTokenProvider ?? _firebaseForcedIdToken {
     if (requestTimeout <= Duration.zero) {
       throw ArgumentError('requestTimeout must be positive.');
     }
@@ -30,14 +36,18 @@ class ApiService {
   final Duration requestTimeout;
   final http.Client? _client;
   final Future<String?> Function() _tokenProvider;
+  final Future<String?> Function() _forceRefreshTokenProvider;
 
-  static Future<String?> _firebaseIdToken() async {
+  static Future<String?> _firebaseIdToken({bool forceRefresh = false}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       throw const ApiFailure(ApiFailureKind.authentication);
     }
-    return user.getIdToken();
+    return user.getIdToken(forceRefresh);
   }
+
+  static Future<String?> _firebaseForcedIdToken() =>
+      _firebaseIdToken(forceRefresh: true);
 
   Future<Map<String, String>> _authHeaders({bool jsonContent = false}) async {
     final token = await _tokenProvider();
@@ -59,6 +69,7 @@ class ApiService {
     String? authorizationToken,
     bool waitForTransport = false,
     bool Function()? canStart,
+    void Function(int statusCode)? onResponseStatus,
     required T Function(Object?) parse,
   }) async {
     final client = _client ?? http.Client();
@@ -88,6 +99,7 @@ class ApiService {
       if (body != null) request.body = jsonEncode(body);
       final response =
           await http.Response.fromStream(await client.send(request));
+      onResponseStatus?.call(response.statusCode);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         // Never copy a backend detail, response body, URI, or token into errors.
         throw ApiFailure.fromStatus(response.statusCode);
@@ -126,14 +138,19 @@ class ApiService {
   /// current. This in-memory scope allows owned cleanup after an account switch
   /// without accidentally borrowing the newly signed-in account's credentials.
   Future<DeviceRegistrationSession> openDeviceRegistrationSession(
-      {required bool Function() isCurrent}) async {
+      {required bool Function() isCurrent,
+      bool forceRefresh = false,
+      void Function(int statusCode)? onUnregisterResponseStatus}) async {
     try {
       if (!isCurrent()) throw const ApiFailure(ApiFailureKind.authentication);
-      final token = await _tokenProvider().timeout(requestTimeout);
+      final provider =
+          forceRefresh ? _forceRefreshTokenProvider : _tokenProvider;
+      final token = await provider().timeout(requestTimeout);
       if (!isCurrent() || token == null || token.trim().isEmpty) {
         throw const ApiFailure(ApiFailureKind.authentication);
       }
-      return DeviceRegistrationSession._(this, token);
+      return DeviceRegistrationSession._(
+          this, token, isCurrent, onUnregisterResponseStatus);
     } on TimeoutException {
       throw const ApiFailure(ApiFailureKind.timeout);
     } on ApiFailure {
@@ -307,6 +324,21 @@ class ApiService {
       _request('DELETE', '/devices',
           body: {'fcm_token': fcmToken}, decodeBody: false, parse: (_) {});
 
+  Future<InstallationCleanupResult> unregisterInstallation({
+    required String installationId,
+    String? currentFcmToken,
+  }) {
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(installationId)) {
+      throw const ApiFailure(ApiFailureKind.validation);
+    }
+    return _request('DELETE', '/devices/installation',
+        body: {
+          'installation_id': installationId,
+          if (currentFcmToken != null) 'fcm_token': currentFcmToken,
+        },
+        parse: InstallationCleanupResult.fromJson);
+  }
+
   Future<AppNotification> updateNotificationRead(
       {required int notificationId, required bool read}) {
     _linkId(notificationId);
@@ -372,6 +404,19 @@ class ApiService {
       _request('POST', '/alerts/$alertId/resolve',
           decodeBody: false, parse: (_) {});
 
+  Future<void> updateAlertLocation({
+    required int alertId,
+    required double latitude,
+    required double longitude,
+  }) =>
+      _request('POST', '/alerts/$alertId/location',
+          body: {'latitude': latitude, 'longitude': longitude},
+          decodeBody: false,
+          parse: (_) {});
+
+  Future<Map<String, dynamic>> fetchAlertLocation(int alertId) =>
+      _request('GET', '/alerts/$alertId/location', parse: _object);
+
   Future<Map<String, dynamic>> acknowledgeAlert(int alertId) =>
       _request('POST', '/alerts/$alertId/acknowledge', parse: _object);
 
@@ -391,46 +436,18 @@ class ApiService {
           },
           parse: _objects);
 
-  Future<List<Map<String, dynamic>>> fetchContacts() =>
-      _request('GET', '/contacts', parse: _objects);
-
-  Future<Map<String, dynamic>> createContact({
-    required String name,
-    required String relationship,
-    required String phone,
-    bool enabled = true,
-  }) =>
-      _request('POST', '/contacts',
-          body: {
-            'name': name,
-            'relationship': relationship,
-            'phone': phone,
-            'enabled': enabled,
-          },
-          parse: _object);
-
-  Future<Map<String, dynamic>> updateContact({
-    required int contactId,
-    String? name,
-    String? relationship,
-    String? phone,
-    bool? enabled,
-  }) =>
-      _request('PATCH', '/contacts/$contactId',
-          body: {
-            if (name != null) 'name': name,
-            if (relationship != null) 'relationship': relationship,
-            if (phone != null) 'phone': phone,
-            if (enabled != null) 'enabled': enabled,
-          },
-          parse: _object);
-
   Future<Map<String, dynamic>> registerDevice({
     required String fcmToken,
     required String platform,
+    String? installationId,
   }) =>
       _request('POST', '/devices',
-          body: {'fcm_token': fcmToken, 'platform': platform}, parse: _object);
+          body: {
+            'fcm_token': fcmToken,
+            'platform': platform,
+            if (installationId != null) 'installation_id': installationId,
+          },
+          parse: _object);
 
   Future<Map<String, dynamic>> sendTestNotification() =>
       _request('POST', '/test-notifications/me', parse: _object);
@@ -438,8 +455,11 @@ class ApiService {
 
 /// A short-lived, memory-only bearer scope. It never exposes its token.
 class DeviceRegistrationSession {
-  DeviceRegistrationSession._(this._api, this._token);
+  DeviceRegistrationSession._(this._api, this._token, this._isCurrent,
+      this._onUnregisterResponseStatus);
   final ApiService _api;
+  final bool Function() _isCurrent;
+  final void Function(int statusCode)? _onUnregisterResponseStatus;
   String? _token;
 
   String get _bearer =>
@@ -448,24 +468,119 @@ class DeviceRegistrationSession {
   Future<void> register(
           {required String fcmToken,
           required String platform,
+          String? installationId,
           required bool Function() canStart}) =>
       _api._request('POST', '/devices',
-          body: {'fcm_token': fcmToken, 'platform': platform},
+          body: {
+            'fcm_token': fcmToken,
+            'platform': platform,
+            if (installationId != null) 'installation_id': installationId,
+          },
           authorizationToken: _bearer,
           waitForTransport: true,
           canStart: canStart, parse: (value) {
         ApiService._object(value);
       });
 
-  Future<void> unregister(String fcmToken) =>
+  Future<InstallationCleanupResult> unregisterInstallation(
+      String installationId,
+      {String? currentFcmToken}) async {
+    try {
+      return await _unregisterInstallation(installationId,
+          currentFcmToken: currentFcmToken);
+    } on ApiFailure catch (error) {
+      if (error.statusCode != 401 || !_isCurrent()) rethrow;
+      final fresh = await _api.openDeviceRegistrationSession(
+          isCurrent: _isCurrent,
+          forceRefresh: true,
+          onUnregisterResponseStatus: _onUnregisterResponseStatus);
+      final token = fresh._token;
+      fresh.close();
+      if (token == null || !_isCurrent()) {
+        throw const ApiFailure(ApiFailureKind.authentication);
+      }
+      _token = token;
+      return _unregisterInstallation(installationId,
+          currentFcmToken: currentFcmToken);
+    }
+  }
+
+  Future<InstallationCleanupResult> _unregisterInstallation(
+          String installationId,
+          {String? currentFcmToken}) =>
+      _api._request('DELETE', '/devices/installation',
+          body: {
+            'installation_id': installationId,
+            if (currentFcmToken != null) 'fcm_token': currentFcmToken,
+          },
+          authorizationToken: _bearer,
+          waitForTransport: true,
+          onResponseStatus: _onUnregisterResponseStatus,
+          parse: InstallationCleanupResult.fromJson);
+
+  Future<void> unregister(String fcmToken) async {
+    try {
+      await _unregister(fcmToken);
+    } on ApiFailure catch (error) {
+      // A DELETE rejected as unauthorized made no change. Refresh once while
+      // the same Firebase account is still current, then retry idempotently.
+      if (error.statusCode != 401 || !_isCurrent()) rethrow;
+      final fresh = await _api.openDeviceRegistrationSession(
+          isCurrent: _isCurrent,
+          forceRefresh: true,
+          onUnregisterResponseStatus: _onUnregisterResponseStatus);
+      final token = fresh._token;
+      fresh.close();
+      if (token == null || !_isCurrent()) {
+        throw const ApiFailure(ApiFailureKind.authentication);
+      }
+      _token = token;
+      await _unregister(fcmToken);
+    }
+  }
+
+  Future<void> _unregister(String fcmToken) =>
       _api._request('DELETE', '/devices',
           body: {'fcm_token': fcmToken},
           authorizationToken: _bearer,
           waitForTransport: true,
+          onResponseStatus: _onUnregisterResponseStatus,
           decodeBody: false,
           parse: (_) {});
 
   void close() {
     _token = null;
+  }
+}
+
+class InstallationCleanupResult {
+  const InstallationCleanupResult({
+    required this.revokedCount,
+    required this.installationRegistrationsRemain,
+    required this.unattributedLegacyRegistrationsRemain,
+  });
+
+  final int revokedCount;
+  final bool installationRegistrationsRemain;
+  final bool unattributedLegacyRegistrationsRemain;
+
+  static InstallationCleanupResult fromJson(Object? value) {
+    final response = ApiService._object(value);
+    final success = response['success'];
+    final revokedCount = response['revoked_count'];
+    final installationRemain = response['installation_registrations_remain'];
+    final legacyRemain = response['unattributed_legacy_registrations_remain'];
+    if (success != true ||
+        revokedCount is! int ||
+        revokedCount < 0 ||
+        installationRemain is! bool ||
+        legacyRemain is! bool) {
+      throw const FormatException('Invalid installation cleanup response.');
+    }
+    return InstallationCleanupResult(
+      revokedCount: revokedCount,
+      installationRegistrationsRemain: installationRemain,
+      unattributedLegacyRegistrationsRemain: legacyRemain,
+    );
   }
 }
