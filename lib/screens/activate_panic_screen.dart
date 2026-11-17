@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
 class ActivatePanicScreen extends StatefulWidget {
-  const ActivatePanicScreen({super.key, required this.onBack, required this.onAlertSent});
+  const ActivatePanicScreen(
+      {super.key, required this.onBack, required this.onAlertSent});
 
   final VoidCallback onBack;
   final Future<void> Function() onAlertSent;
@@ -23,78 +24,76 @@ class _ActivatePanicScreenState extends State<ActivatePanicScreen> {
   String? _errorMessage;
 
   Future<void> _submitAlert() async {
-  if (_isSubmitting) return;
+    if (_isSubmitting) return;
 
-  setState(() {
-    _isSubmitting = true;
-    _errorMessage = null;
-  });
-
-  try {
-    await widget.onAlertSent();
-  } catch (e) {
-    if (!mounted) return;
     setState(() {
-      _errorMessage =
-          'Could not send the alert. Check your location permissions and connection, then try again.';
-      _isSubmitting = false;
-      _pressed = false;
-      _progress = 0;
+      _isSubmitting = true;
+      _errorMessage = null;
     });
-    return;
-  }
 
-  if (mounted) {
-    setState(() {
-      _isSubmitting = false;
-    });
-  }
-}
-
-
-void _startHold() {
-  if (_isSubmitting || !mounted) return;
-
-  _timer?.cancel();
-  setState(() {
-    _pressed = true;
-    _progress = 0;
-    _errorMessage = null;
-  });
-
-  var elapsed = 0;
-  _timer = Timer.periodic(const Duration(milliseconds: _stepMs), (t) {
-    if (!mounted || _isSubmitting) {
-      t.cancel();
+    try {
+      await widget.onAlertSent();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage =
+            'Could not send the alert. Check your location permissions and connection, then try again.';
+        _isSubmitting = false;
+        _pressed = false;
+        _progress = 0;
+      });
       return;
     }
 
-    elapsed += _stepMs;
+    if (mounted) {
+      setState(() {
+        _isSubmitting = false;
+      });
+    }
+  }
 
+  void _startHold() {
+    if (_isSubmitting || !mounted) return;
+
+    _timer?.cancel();
     setState(() {
-      _progress = (elapsed / _totalMs).clamp(0.0, 1.0);
+      _pressed = true;
+      _progress = 0;
+      _errorMessage = null;
     });
 
-    if (elapsed >= _totalMs) {
-      t.cancel();
-      _timer = null;
-      _submitAlert();
-    }
-  });
-}
+    var elapsed = 0;
+    _timer = Timer.periodic(const Duration(milliseconds: _stepMs), (t) {
+      if (!mounted || _isSubmitting) {
+        t.cancel();
+        return;
+      }
 
-void _cancelHold() {
-  _timer?.cancel();
-  _timer = null;
+      elapsed += _stepMs;
 
-  if (!mounted || _isSubmitting) return;
+      setState(() {
+        _progress = (elapsed / _totalMs).clamp(0.0, 1.0);
+      });
 
-  setState(() {
-    _pressed = false;
-    _progress = 0;
-  });
-}
+      if (elapsed >= _totalMs) {
+        t.cancel();
+        _timer = null;
+        _submitAlert();
+      }
+    });
+  }
 
+  void _cancelHold() {
+    _timer?.cancel();
+    _timer = null;
+
+    if (!mounted || _isSubmitting) return;
+
+    setState(() {
+      _pressed = false;
+      _progress = 0;
+    });
+  }
 
   @override
   void dispose() {
@@ -116,7 +115,8 @@ void _cancelHold() {
                 children: [
                   IconButton(
                     onPressed: widget.onBack,
-                    icon: const Icon(Icons.arrow_back, color: AppColors.navyDark),
+                    icon:
+                        const Icon(Icons.arrow_back, color: AppColors.navyDark),
                   ),
                 ],
               ),
@@ -155,16 +155,21 @@ void _cancelHold() {
                               width: 200,
                               height: 200,
                               decoration: const BoxDecoration(
-                                  color: AppColors.redAlert, shape: BoxShape.circle),
+                                  color: AppColors.redAlert,
+                                  shape: BoxShape.circle),
                               alignment: Alignment.center,
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.warning_rounded, color: Colors.white, size: 30),
+                                  const Icon(Icons.warning_rounded,
+                                      color: Colors.white, size: 30),
                                   const SizedBox(height: 6),
                                   Text(
-                                    _pressed ? 'Activating in' : 'Hold to activate',
-                                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                                    _pressed
+                                        ? 'Activating in'
+                                        : 'Hold to activate',
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 13),
                                     textAlign: TextAlign.center,
                                   ),
                                   Text(
@@ -175,7 +180,8 @@ void _cancelHold() {
                                         fontSize: 40),
                                   ),
                                   const Text('Hold to confirm',
-                                      style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                      style: TextStyle(
+                                          color: Colors.white70, fontSize: 12)),
                                 ],
                               ),
                             ),
@@ -185,13 +191,15 @@ void _cancelHold() {
                     ),
                     const SizedBox(height: 32),
                     Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.location_on, color: AppColors.redAlert),
+                            const Icon(Icons.location_on,
+                                color: AppColors.redAlert),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
@@ -199,24 +207,22 @@ void _cancelHold() {
                                 children: [
                                   RichText(
                                     text: const TextSpan(
-                                      style: TextStyle(color: AppColors.navyDark, fontSize: 14),
+                                      style: TextStyle(
+                                          color: AppColors.navyDark,
+                                          fontSize: 14),
                                       children: [
                                         TextSpan(
                                             text:
-                                                'Your live location will be shared with nearby users within '),
-                                        TextSpan(
-                                            text: '1 km',
-                                            style: TextStyle(
-                                                color: AppColors.redAlert,
-                                                fontWeight: FontWeight.w700)),
-                                        TextSpan(text: '.'),
+                                                'Your location is shared with accepted connections while the alert is active. Updates depend on GPS and network availability.'),
                                       ],
                                     ),
                                   ),
                                   const SizedBox(height: 4),
                                   const Text(
-                                    'Emergency contacts and nearby SafeCircle users will be notified immediately.',
-                                    style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                                    'Your accepted SafeCircle connections will be notified immediately.',
+                                    style: TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 13),
                                   ),
                                 ],
                               ),
@@ -234,7 +240,8 @@ void _cancelHold() {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.redAlert,
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(28)),
                         ),
                         icon: const Icon(Icons.campaign, size: 18),
                         label: Text(
@@ -262,7 +269,8 @@ void _cancelHold() {
                         onPressed: widget.onBack,
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: AppColors.tealPrimary),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(28)),
                         ),
                         child: const Text('Cancel',
                             style: TextStyle(
@@ -275,12 +283,14 @@ void _cancelHold() {
                     const Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.verified_user, color: AppColors.tealPrimary, size: 18),
+                        Icon(Icons.verified_user,
+                            color: AppColors.tealPrimary, size: 18),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'False alerts can cause delay in real emergencies. Please activate only if you need help.',
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                            style: TextStyle(
+                                color: AppColors.textMuted, fontSize: 13),
                           ),
                         ),
                       ],
@@ -304,7 +314,8 @@ class _RingPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     const stroke = 10.0;
-    final rect = Rect.fromLTWH(stroke / 2, stroke / 2, size.width - stroke, size.height - stroke);
+    final rect = Rect.fromLTWH(
+        stroke / 2, stroke / 2, size.width - stroke, size.height - stroke);
 
     final bgPaint = Paint()
       ..color = AppColors.redAlertLight
@@ -322,5 +333,6 @@ class _RingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RingPainter oldDelegate) => oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _RingPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }

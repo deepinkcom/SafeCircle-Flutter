@@ -343,8 +343,7 @@ void main() {
           count != null && count > 0);
     }
   });
-  testWidgets(
-      'both Home and Contacts bells open the same shared notification state',
+  testWidgets('Home and Profile bells open the same shared notification state',
       (tester) async {
     final api = NotificationsFakeApi()..notifications = [testNotification(1)];
     final app = await boot(tester, api);
@@ -361,11 +360,44 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.byTooltip('Notifications, 0 unread'), findsOneWidget);
-    await tapText(tester, 'Emergency\nContacts');
+    await tapText(tester, 'Profile');
     await tester.tap(find.byTooltip('Notifications, 0 unread'));
     await tester.pumpAndSettle();
     expect(find.byType(NotificationsScreen), findsOneWidget);
-    expect(api.phoneWrites, 0);
+  });
+  testWidgets('History bell opens the existing shared Notifications screen',
+      (tester) async {
+    final api = NotificationsFakeApi()..notifications = [testNotification(1)];
+    final app = await boot(tester, api);
+    await tapText(tester, 'History');
+    await tester.tap(find.byTooltip('Notifications, 1 unread'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NotificationsScreen), findsOneWidget);
+    expect(
+        identical(
+            tester
+                .element(find.byType(NotificationsScreen))
+                .read<NotificationsState>(),
+            app.notifications),
+        isTrue);
+  });
+
+  testWidgets(
+      'acknowledgement notification shows responder copy without opening a location',
+      (tester) async {
+    final api = NotificationsFakeApi()
+      ..notifications = [
+        testNotification(9,
+            category: 'emergency',
+            eventType: 'emergency.acknowledged',
+            source: 88)
+      ];
+    await boot(tester, api);
+    await tester.tap(find.byTooltip('Notifications, 1 unread'));
+    await tester.pumpAndSettle();
+    await tapText(tester, 'Test notification 9');
+    expect(api.notificationAlertCalls, 0);
+    expect(find.textContaining('Response details are shown'), findsOneWidget);
   });
   for (final status in [
     'pending',

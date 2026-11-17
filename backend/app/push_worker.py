@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .device_cleanup import remove_registration
-from .models import Alert, Device, EmergencyContactLink, Notification, PushDelivery, User
+from .models import Alert, AlertAcknowledgement, Device, EmergencyContactLink, Notification, PushDelivery, User
 from .notification_events import recover_one_pending_emergency_event
 from .push_submission import bounded_firebase_delivery as firebase_delivery
 
@@ -29,6 +29,31 @@ def _utc(value):
 
 def _emergency_delivery_allowed(db, notice, *, lock=False):
     """Require an active panic alert and a still-accepted participant link."""
+    if notice.event_type == "emergency.acknowledged":
+        acknowledgement = db.get(AlertAcknowledgement, notice.source_id)
+        if acknowledgement is None:
+            return False
+        alert_query = select(Alert).where(
+            Alert.id == acknowledgement.alert_id, Alert.kind == "panic",
+            Alert.user_id == notice.recipient_user_id,
+        )
+        if lock:
+            alert_query = alert_query.with_for_update()
+        alert = db.scalar(alert_query)
+        if alert is None:
+            return False
+        link_query = select(EmergencyContactLink.id).where(
+            EmergencyContactLink.status == "accepted",
+            or_(
+                (EmergencyContactLink.inviter_user_id == alert.user_id)
+                & (EmergencyContactLink.invitee_user_id == acknowledgement.responder_user_id),
+                (EmergencyContactLink.invitee_user_id == alert.user_id)
+                & (EmergencyContactLink.inviter_user_id == acknowledgement.responder_user_id),
+            ),
+        )
+        if lock:
+            link_query = link_query.with_for_update()
+        return db.scalar(link_query) is not None
     if notice.event_type != "emergency.panic":
         return False
     alert_query = select(Alert).where(

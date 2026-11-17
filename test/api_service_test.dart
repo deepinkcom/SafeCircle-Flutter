@@ -526,6 +526,21 @@ void main() {
       response: null,
       call: (api) => api.resolveAlert(7)
     ),
+    'update active location': (
+      method: 'POST',
+      path: '/alerts/7/location',
+      body: {'latitude': -33.9, 'longitude': 18.4},
+      response: null,
+      call: (api) =>
+          api.updateAlertLocation(alertId: 7, latitude: -33.9, longitude: 18.4)
+    ),
+    'read protected location': (
+      method: 'GET',
+      path: '/alerts/7/location',
+      body: null,
+      response: {'id': 7, 'latitude': -33.9, 'longitude': 18.4},
+      call: (api) => api.fetchAlertLocation(7)
+    ),
     'acknowledge': (
       method: 'POST',
       path: '/alerts/7/acknowledge',
@@ -549,43 +564,6 @@ void main() {
       response: [],
       call: (api) => api.fetchNearbyAlerts(latitude: -33.9, longitude: 18.4)
     ),
-    'contacts': (
-      method: 'GET',
-      path: '/contacts',
-      body: null,
-      response: [
-        {'id': 2, 'enabled': false}
-      ],
-      call: (api) => api.fetchContacts()
-    ),
-    'create contact': (
-      method: 'POST',
-      path: '/contacts',
-      body: {
-        'name': 'Name',
-        'relationship': 'Friend',
-        'phone': '000',
-        'enabled': true
-      },
-      response: {'id': 2},
-      call: (api) =>
-          api.createContact(name: 'Name', relationship: 'Friend', phone: '000')
-    ),
-    'edit contact': (
-      method: 'PATCH',
-      path: '/contacts/2',
-      body: {'name': 'Updated', 'relationship': 'Family', 'phone': '001'},
-      response: {'id': 2},
-      call: (api) => api.updateContact(
-          contactId: 2, name: 'Updated', relationship: 'Family', phone: '001')
-    ),
-    'toggle contact': (
-      method: 'PATCH',
-      path: '/contacts/2',
-      body: {'enabled': false},
-      response: {'id': 2, 'enabled': false},
-      call: (api) => api.updateContact(contactId: 2, enabled: false)
-    ),
     'device': (
       method: 'POST',
       path: '/devices',
@@ -593,6 +571,18 @@ void main() {
       response: {'id': 3},
       call: (api) => api.registerDevice(
           fcmToken: 'synthetic-device-token', platform: 'android')
+    ),
+    'installation cleanup': (
+      method: 'DELETE',
+      path: '/devices/installation',
+      body: {'installation_id': 'a' * 64},
+      response: {
+        'success': true,
+        'revoked_count': 1,
+        'installation_registrations_remain': false,
+        'unattributed_legacy_registrations_remain': false
+      },
+      call: (api) => api.unregisterInstallation(installationId: 'a' * 64)
     ),
     'test notification': (
       method: 'POST',
@@ -623,7 +613,13 @@ void main() {
             : reply(entry.value.response);
       });
       final result = await entry.value.call(api);
-      expect(result, entry.key == 'panic' ? 7 : entry.value.response);
+      expect(
+          result,
+          entry.key == 'panic'
+              ? 7
+              : entry.key == 'installation cleanup'
+                  ? isA<InstallationCleanupResult>()
+                  : entry.value.response);
     });
     test('legacy ${entry.key} also sanitizes HTTP failures', () async {
       final api = service(

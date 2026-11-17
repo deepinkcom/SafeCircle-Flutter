@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -24,6 +23,26 @@ class _RealMapState extends State<RealMap> {
   LatLng? _currentLocation;
   String? _errorMessage;
   bool _isLoading = true;
+
+  @override
+  void didUpdateWidget(covariant RealMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final updated = _emergencyLocation;
+    final oldPerson = oldWidget.nearbyPerson;
+    final oldLocation = oldPerson == null || !oldPerson.hasValidLocation
+        ? null
+        : LatLng(oldPerson.latitude!, oldPerson.longitude!);
+    if (updated != null && updated != oldLocation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        try {
+          _mapController.move(updated, 15);
+        } catch (_) {
+          // The map controller may not be attached until its first frame.
+        }
+      });
+    }
+  }
 
   LatLng? get _emergencyLocation {
     final person = widget.nearbyPerson;
@@ -51,15 +70,13 @@ class _RealMapState extends State<RealMap> {
     });
 
     try {
-      final serviceEnabled =
-      await Geolocator.isLocationServiceEnabled();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
       if (!serviceEnabled) {
         throw Exception('Location services are disabled.');
       }
 
-      LocationPermission permission =
-      await Geolocator.checkPermission();
+      LocationPermission permission = await Geolocator.checkPermission();
 
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -72,7 +89,7 @@ class _RealMapState extends State<RealMap> {
       if (permission == LocationPermission.deniedForever) {
         throw Exception(
           'Location permission is permanently denied. '
-              'Enable it in your device settings.',
+          'Enable it in your device settings.',
         );
       }
 
@@ -101,13 +118,14 @@ class _RealMapState extends State<RealMap> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    final emergencyLocation = _emergencyLocation;
+    if (_isLoading && emergencyLocation == null) {
       return const Center(
         child: CircularProgressIndicator(),
       );
     }
 
-    if (_errorMessage != null) {
+    if (_errorMessage != null && emergencyLocation == null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -133,20 +151,23 @@ class _RealMapState extends State<RealMap> {
       );
     }
 
-    final myLocation = _currentLocation!;
-    final emergencyLocation = _emergencyLocation;
+    final myLocation = _currentLocation ?? emergencyLocation;
+    if (myLocation == null) {
+      return const Center(child: Text('Location is unavailable'));
+    }
 
     final markers = <Marker>[
-      Marker(
-        point: myLocation,
-        width: 50,
-        height: 50,
-        child: const Icon(
-          Icons.my_location,
-          color: Colors.blue,
-          size: 36,
+      if (_currentLocation != null)
+        Marker(
+          point: _currentLocation!,
+          width: 50,
+          height: 50,
+          child: const Icon(
+            Icons.my_location,
+            color: Colors.blue,
+            size: 36,
+          ),
         ),
-      ),
     ];
 
     if (emergencyLocation != null) {
@@ -172,8 +193,7 @@ class _RealMapState extends State<RealMap> {
       ),
       children: [
         TileLayer(
-          urlTemplate:
-          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.safecircle.app',
         ),
         MarkerLayer(

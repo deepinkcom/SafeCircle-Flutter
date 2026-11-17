@@ -31,7 +31,7 @@ class EmergencyAuthorizationApi extends ContactLinksFakeApi {
 NearbyPerson alert({int id = 900, int owner = 2}) => NearbyPerson(
       id: id,
       ownerUserId: owner,
-      name: 'Emergency contact',
+      name: 'Emergency nearby',
       distanceLabel: '0.3 km away',
       locationLabel: 'Safe synthetic area',
       status: 'active',
@@ -89,11 +89,13 @@ void main() {
 
   tearDown(() => app.dispose());
 
-  testWidgets('accepted emergency contact sees and uses acknowledgement',
+  testWidgets('accepted connection sees owner profile name and acknowledgement',
       (tester) async {
     await prepare(links: [testLink(1, 'accepted', incoming: false)]);
     await showAlert(tester);
     await pumpFrames(tester);
+
+    expect(find.text('Example Member'), findsOneWidget);
 
     final action = find.text("I'm On My Way");
     expect(action, findsOneWidget);
@@ -117,8 +119,8 @@ void main() {
     await pumpFrames(tester);
 
     expect(find.text("I'm On My Way"), findsNothing);
-    expect(find.textContaining('Only accepted emergency contacts'),
-        findsOneWidget);
+    expect(find.text('Example Member'), findsNothing);
+    expect(find.textContaining('Only accepted connections'), findsOneWidget);
   });
 
   for (final status in ['revoked', 'rejected', 'pending']) {
@@ -129,8 +131,7 @@ void main() {
       await pumpFrames(tester);
 
       expect(find.text("I'm On My Way"), findsNothing);
-      expect(find.textContaining('Only accepted emergency contacts'),
-          findsOneWidget);
+      expect(find.textContaining('Only accepted connections'), findsOneWidget);
     });
   }
 
@@ -176,8 +177,7 @@ void main() {
     completer.complete([]);
     await pumpFrames(tester);
     expect(find.text("I'm On My Way"), findsNothing);
-    expect(find.textContaining('Only accepted emergency contacts'),
-        findsOneWidget);
+    expect(find.textContaining('Only accepted connections'), findsOneWidget);
   });
 
   testWidgets('loading relationship lookup never exposes action',
