@@ -117,7 +117,10 @@ class AlertAcknowledgement(Base):
  
 class Device(Base):
     __tablename__ = "devices"
-    __table_args__ = (UniqueConstraint("fcm_token", name="uq_devices_fcm_token"),)
+    __table_args__ = (
+        UniqueConstraint("fcm_token", name="uq_devices_fcm_token"),
+        Index("ix_devices_user_installation", "user_id", "installation_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(
@@ -126,9 +129,27 @@ class Device(Base):
     )
     fcm_token: Mapped[str] = mapped_column(String(500), nullable=False)
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    installation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     registered_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class DeviceInstallation(Base):
+    """Server-owned registration for one app installation identifier."""
+
+    __tablename__ = "device_installations"
+
+    installation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
 

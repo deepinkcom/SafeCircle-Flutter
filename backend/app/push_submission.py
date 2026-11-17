@@ -14,6 +14,8 @@ def _submit(
     recipient_uid,
     category,
     event_type,
+    title,
+    body,
 ):
     from .notification_service import firebase_notification_delivery
     try:
@@ -23,6 +25,8 @@ def _submit(
                 id=notification_id,
                 category=category,
                 event_type=event_type,
+                title=title,
+                message=body,
             ),
             recipient_uid,
         )
@@ -54,6 +58,8 @@ def bounded_firebase_delivery(token, notification, recipient_uid, *,
             recipient_uid,
             getattr(notification, "category", None),
             getattr(notification, "event_type", None),
+            getattr(notification, "title", "SafeCircle"),
+            getattr(notification, "message", "You have a SafeCircle update."),
         ),
         daemon=True,
     )

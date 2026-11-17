@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../screens/activate_panic_screen.dart';
 import '../screens/alert_history_screen.dart';
-import '../screens/contacts_screen.dart';
 import '../screens/contact_links_screen.dart';
 import '../screens/invite_contact_screen.dart';
 import '../screens/notifications_screen.dart';
@@ -115,7 +114,7 @@ class _AuthFlowState extends State<_AuthFlow> {
 
   void _enterMain() {
     if (!mounted) return;
-    _initialData = _loadContacts();
+    _initialData = _loadInitialData();
     setState(() => _screen = _AuthScreen.loggedIn);
   }
 
@@ -123,13 +122,43 @@ class _AuthFlowState extends State<_AuthFlow> {
     if (_logoutInProgress) return;
     _logoutInProgress = true;
     try {
-      await _notificationService.detachDevice();
+      // Without a configured Firebase session there is no authenticated user
+      // or FCM installation to revoke. AuthService.logOut is a no-op in the
+      // same state, so do not block local/test recovery on backend cleanup.
+      if (FirebaseBootstrap.isReady) {
+        await _notificationService.detachDevice();
+      }
+    } on DeviceCleanupUnverified catch (error) {
+      _logoutInProgress = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    } on ApiFailure catch (error) {
+      _logoutInProgress = false;
+      if (mounted) {
+        final message = switch (error.kind) {
+          ApiFailureKind.authentication =>
+            'Your SafeCircle session could not be verified to remove this device. Check your connection and retry sign out.',
+          ApiFailureKind.network =>
+            'Could not reach SafeCircle to remove this device. Check your connection and retry sign out.',
+          ApiFailureKind.timeout =>
+            'SafeCircle did not confirm device cleanup in time. Check your connection and retry sign out.',
+          ApiFailureKind.server =>
+            'SafeCircle could not remove this device right now. Please retry sign out shortly.',
+          _ => error.message,
+        };
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+      return;
     } catch (_) {
       _logoutInProgress = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text(
-                'Could not confirm notification cleanup. Check your connection and retry sign out.')));
+                "SafeCircle could not verify this phone's notification registration. Check your connection and Google Play services, then retry sign out.")));
       }
       return;
     }
@@ -168,15 +197,8 @@ class _AuthFlowState extends State<_AuthFlow> {
     _enterMain();
   }
 
-  Future<void> _loadContacts() async {
+  Future<void> _loadInitialData() async {
     final appState = context.read<AppState>();
-
-    try {
-      await appState.loadContacts();
-    } catch (error, stackTrace) {
-      debugPrint('Failed to load contacts: $error');
-      debugPrint('$stackTrace');
-    }
 
     try {
       await appState.loadAlertHistory();
@@ -519,6 +541,9 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
                     onSignIn: widget.onSignInAgain,
                     onCompleteProfile: _openConnectionProfile))));
       } else if (item.category == NotificationCategory.emergency) {
+        if (item.eventType == 'emergency.acknowledged') {
+          return 'Response details are shown in this notification.';
+        }
         final alert = await app.findNotificationAlert(item.id, item.sourceId);
         if (!current()) return null;
         if (alert == null) {
@@ -605,16 +630,21 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
     );
   }
 
-  void _openContacts() {
+  void _openConnections() {
     context.read<AppState>().notifications.refreshCount();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ContactsScreen(
-            onBack: () => Navigator.of(context).pop(),
-            onOpenNotifications: _openNotifications,
-            onOpenConnections: _openConnections),
+    _showConnections();
+  }
+
+  void _showConnections() {
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => ChangeNotifierProvider.value(
+        value: context.read<AppState>().contactLinks,
+        child: ContactLinksScreen(
+            onInvite: _openInvite,
+            onSignIn: widget.onSignInAgain,
+            onCompleteProfile: _openConnectionProfile),
       ),
-    );
+    ));
   }
 
   Future<void> _openConnectionProfile() async {
@@ -622,7 +652,7 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
       builder: (_) => Scaffold(
         appBar: AppBar(title: const Text('Account recovery')),
         body: ProfileScreen(
-            onOpenContacts: _openContacts,
+            onOpenConnections: _openConnections,
             onLogOut: widget.onLogOut,
             onOpenNotifications: _openNotifications,
             onNotificationSettings: _notificationSettings),
@@ -641,21 +671,11 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
     ));
   }
 
-  void _openConnections() {
-    Navigator.of(context).push<void>(MaterialPageRoute(
-      builder: (_) => ChangeNotifierProvider.value(
-        value: context.read<AppState>().contactLinks,
-        child: ContactLinksScreen(
-            onInvite: _openInvite,
-            onSignIn: widget.onSignInAgain,
-            onCompleteProfile: _openConnectionProfile),
-      ),
-    ));
-  }
-
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    final shellNavigator = Navigator.of(context);
+    final shellMessenger = ScaffoldMessenger.of(context);
     final showSetup = app.userProfile.isSignedIn &&
         (app.checkingBackendProfile ||
             app.backendProfileError != null ||
@@ -663,7 +683,7 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
     final tabs = <Widget>[
       HomeScreen(
         onActivatePanic: _openActivatePanic,
-        onOpenContacts: _openContacts,
+        onOpenConnections: _openConnections,
         onOpenAlerts: _openEmergencyNearby,
         onOpenNotifications: _openNotifications,
       ),
@@ -678,9 +698,39 @@ class _MainShellState extends State<_MainShell> with WidgetsBindingObserver {
       _MapTab(
         onActivatePanic: _openActivatePanic,
       ),
-      const AlertHistoryScreen(),
+      AlertHistoryScreen(
+        onOpenNotifications: _openNotifications,
+        onOpenActiveAlert: (event) async {
+          try {
+            final restored = await app.restoreActiveEmergency(event);
+            if (!mounted || !restored) {
+              if (mounted) {
+                shellMessenger.showSnackBar(const SnackBar(
+                    content:
+                        Text('This active alert is no longer available.')));
+              }
+              return;
+            }
+            shellNavigator.push(MaterialPageRoute(
+              builder: (_) => EmergencyActiveScreen(
+                onBack: () => shellNavigator.pop(),
+                onImSafe: () async {
+                  await app.resolveAlertById(event.id);
+                  if (!mounted) return;
+                  shellNavigator.popUntil((route) => route.isFirst);
+                },
+              ),
+            ));
+          } on ApiFailure catch (failure) {
+            if (mounted) {
+              shellMessenger
+                  .showSnackBar(SnackBar(content: Text(failure.message)));
+            }
+          }
+        },
+      ),
       ProfileScreen(
-          onOpenContacts: _openContacts,
+          onOpenConnections: _openConnections,
           onLogOut: widget.onLogOut,
           onOpenNotifications: _openNotifications,
           onNotificationSettings: _notificationSettings),

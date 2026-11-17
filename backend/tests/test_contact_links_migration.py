@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.database import settings
-from app.models import EmergencyContact, Device, EmergencyContactLink, User
+from app.models import EmergencyContact, EmergencyContactLink, User
 
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -35,7 +35,15 @@ def migration_db(tmp_path, monkeypatch):
 
     User.__table__.create(engine)
     EmergencyContact.__table__.create(engine)
-    Device.__table__.create(engine)
+    # Keep the historical pre-installation device shape so later revisions
+    # exercise adding installation_id instead of starting with the new model.
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE devices (id INTEGER PRIMARY KEY, "
+            "user_id INTEGER NOT NULL REFERENCES users(id), "
+            "fcm_token VARCHAR(500) NOT NULL, platform VARCHAR(50) NOT NULL, "
+            "registered_at DATETIME NOT NULL)"
+        ))
     with engine.begin() as connection:
         connection.execute(User.__table__.insert(), [
             dict(id=i, firebase_uid=f"synthetic-{i}", name=f"User {i}",

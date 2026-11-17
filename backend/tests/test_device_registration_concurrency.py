@@ -15,6 +15,58 @@ from test_contact_links import database, headers
 
 TOKEN = 'synthetic-device-token-private-marker'
 
+
+@pytest.mark.parametrize('winner', [1, 2])
+def test_conflict_retry_reclaims_installation_and_preserves_owner(client, database, monkeypatch, winner):
+    from app import devices
+    from app.models import DeviceInstallation
+    original_claim = devices._claim_installation
+    original_commit = Session.commit
+    claims = 0
+    raced = False
+
+    def claim(db, installation_id, owner):
+        nonlocal claims
+        claims += 1
+        # Model an initial claim that the transaction rollback will undo.
+        # Avoid holding SQLite's global writer lock while injecting a winner.
+        if claims > 1:
+            # SQLite legacy transaction mode does not BEGIN for a SELECT;
+            # an outer transaction is needed for SAVEPOINT rollback parity
+            # with PostgreSQL. This is fixture setup, not application behavior.
+            connection = db.connection()
+            if not connection.connection.driver_connection.in_transaction:
+                connection.exec_driver_sql('BEGIN')
+            return original_claim(db, installation_id, owner)
+
+    def commit(db):
+        nonlocal raced
+        if not raced and any(isinstance(item, Device) and item.fcm_token == TOKEN for item in db.new):
+            raced = True
+            with Session(database) as other:
+                other.add(Device(user_id=winner, fcm_token=TOKEN, platform='android'))
+                original_commit(other)
+        return original_commit(db)
+
+    monkeypatch.setattr(devices, '_claim_installation', claim)
+    monkeypatch.setattr(Session, 'commit', commit)
+    installation_id = 'a' * 64
+    result = client.post('/devices', headers=headers(1), json={
+        'fcm_token': TOKEN, 'platform': 'android', 'installation_id': installation_id,
+    })
+    assert result.status_code == (200 if winner == 1 else 409)
+    assert claims == 2
+    with Session(database) as db:
+        installation = db.get(DeviceInstallation, installation_id)
+        device = db.scalar(select(Device).where(Device.fcm_token == TOKEN))
+        assert device.user_id == winner
+        if winner == 1:
+            assert installation.owner_user_id == 1
+            assert device.installation_id == installation_id
+        else:
+            assert installation is None
+            assert device.installation_id is None
+
 @pytest.fixture
 def client(database, monkeypatch):
     app = FastAPI()

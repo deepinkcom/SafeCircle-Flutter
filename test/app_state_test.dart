@@ -16,6 +16,11 @@ class FakeLocationService extends LocationService {
   bool shouldFail = false;
   int locationCalls = 0;
   int readableLocationCalls = 0;
+  bool shouldFailReadable = false;
+  final updates = StreamController<({double lat, double lng})>.broadcast();
+
+  @override
+  Stream<({double lat, double lng})> watchLocation() => updates.stream;
 
   @override
   Future<({double lat, double lng})> getCurrentLocation() async {
@@ -34,6 +39,7 @@ class FakeLocationService extends LocationService {
     required double lng,
   }) async {
     readableLocationCalls++;
+    if (shouldFailReadable) throw StateError('No geocoder');
     return 'Test location';
   }
 }
@@ -46,6 +52,9 @@ class FakeApiService extends ApiService {
   int? resolvedAlertId;
   double? sentLatitude;
   double? sentLongitude;
+  int locationUpdates = 0;
+  double? updatedLatitude;
+  double? updatedLongitude;
 
   FakeApiService() : super(baseUrl: 'http://127.0.0.1:1');
 
@@ -74,11 +83,57 @@ class FakeApiService extends ApiService {
       throw Exception('Simulated resolve failure');
     }
   }
+
+  @override
+  Future<void> updateAlertLocation({
+    required int alertId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    locationUpdates++;
+    updatedLatitude = latitude;
+    updatedLongitude = longitude;
+  }
 }
 
 class FakeAuthService extends AuthService {}
 
 void main() {
+  test('restores own active emergency using owner-authorized server location',
+      () async {
+    final api = ContactLinksFakeApi()
+      ..onAlertLocation = (id) async => {
+            'id': id,
+            'owner_user_id': 1,
+            'status': 'active',
+            'latitude': -33.9,
+            'longitude': 18.4,
+            'created_at': '2026-11-16T10:00:00Z',
+          };
+    final app = AppState(
+        apiService: api,
+        authService: ContactLinksFakeAuth(),
+        locationService: FakeLocationService())
+      ..userProfile = testProfile('alice');
+    addTearDown(app.dispose);
+    await app.checkBackendProfile();
+    const event = AlertEvent(
+      id: 44,
+      kind: AlertKind.emergencySent,
+      title: 'Emergency sent',
+      timeLabel: '16 Nov 2026, 10:00',
+      locationLabel: 'Test location',
+      status: AlertStatus.active,
+    );
+    app.alertHistory.add(event);
+
+    expect(await app.restoreActiveEmergency(event), isTrue);
+    expect(app.isEmergencyActive, isTrue);
+    expect(app.activeEmergencyPerson?.id, 44);
+    expect(app.activeEmergencyPerson?.hasValidLocation, isTrue);
+    expect(app.locationUpdatedAt, isNull);
+  });
+
   relationshipIntegrationTests();
   late FakeLocationService location;
   late FakeApiService api;
@@ -97,6 +152,7 @@ void main() {
 
   tearDown(() {
     state.dispose();
+    location.updates.close();
   });
 
   test('starts emergency after location and API succeed', () async {
@@ -109,6 +165,8 @@ void main() {
     expect(api.sentLongitude, 18.4);
 
     expect(state.isEmergencyActive, isTrue);
+    expect(state.activeEmergencyPerson?.latitude, -33.9);
+    expect(state.activeEmergencyPerson?.longitude, 18.4);
     expect(state.currentLocation, 'Test location');
     expect(state.alertHistory, hasLength(1));
     expect(state.alertHistory.first.id, 123);
@@ -144,6 +202,24 @@ void main() {
     expect(api.panicCalls, 1);
     expect(state.isEmergencyActive, isFalse);
     expect(state.alertHistory, isEmpty);
+  });
+
+  test('uses coordinates when reverse geocoding is unavailable', () async {
+    location.shouldFailReadable = true;
+    await state.startEmergency();
+    expect(api.panicCalls, 1);
+    expect(state.currentLocation, '-33.90000, 18.40000');
+    expect(state.activeEmergencyPerson?.hasValidLocation, isTrue);
+  });
+
+  test('uploads fresh GPS coordinates during an active emergency', () async {
+    await state.startEmergency();
+    location.updates.add((lat: -33.8, lng: 18.5));
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(api.locationUpdates, 1);
+    expect(api.updatedLatitude, -33.8);
+    expect(api.updatedLongitude, 18.5);
+    expect(state.activeEmergencyPerson?.latitude, -33.8);
   });
 
   test('keeps emergency active if backend resolution fails', () async {
@@ -245,6 +321,19 @@ void relationshipIntegrationTests() {
       signOut.complete();
       await logout;
       expect(app.userProfile.isSignedIn, isFalse);
+    });
+
+    test(
+        'Firebase sign-out failure keeps the account from being reported signed out',
+        () async {
+      app.userProfile = testProfile('alice');
+      auth.onLogout =
+          () async => throw AuthFailure('synthetic sign-out failure');
+
+      await expectLater(app.logOut(), throwsA(isA<AuthFailure>()));
+
+      expect(app.userProfile.uid, 'alice');
+      expect(app.userProfile.isSignedIn, isTrue);
     });
 
     test('direct public profile account changes reset relationship caches',
@@ -376,29 +465,6 @@ void relationshipIntegrationTests() {
       expect(notifications, 0);
       expect(await app.contactLinks.loadIncomingInvitations(), isFalse);
       expect(api.incomingCalls, 0);
-    });
-
-    test('phone-contact add edit toggle and enabled counts remain separate',
-        () async {
-      app.userProfile = testProfile('alice');
-      await app.loadContacts();
-      expect(app.contacts.single.enabled, isTrue);
-      await app.addContact('Second Contact', 'Family', '0000000001');
-      await app.editContact(10, 'Updated Contact', 'Parent', '0000000002');
-      await app.toggleContact(10);
-      final before = List<EmergencyContact>.of(app.contacts);
-      expect(before.where((contact) => contact.enabled), hasLength(1));
-      api.acceptedData = [testLink(7, 'accepted')];
-      await app.contactLinks.loadAcceptedRelationships();
-      expect((await app.contactLinks.revokeRelationship(7)).succeeded, isTrue);
-      expect(app.contacts, before);
-      expect(app.contacts.where((contact) => contact.enabled), hasLength(1));
-      expect(app.contacts.first.name, 'Updated Contact');
-      expect(api.phoneReads, 1);
-      expect(api.phoneWrites, 3);
-      await app.logOut();
-      expect(app.contacts, isEmpty);
-      expect(app.contactLinks.accepted.items, isEmpty);
     });
 
     test(

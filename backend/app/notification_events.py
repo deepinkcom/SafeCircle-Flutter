@@ -6,7 +6,7 @@ import logging
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .models import Alert, Device, EmergencyContactLink, Notification, PushDelivery, User
+from .models import Alert, AlertAcknowledgement, Device, EmergencyContactLink, Notification, PushDelivery, User
 
 
 CONNECTION_COPY = {
@@ -62,7 +62,7 @@ def record_emergency_alert_events(
     alert: Alert,
     created_at: datetime,
 ) -> int:
-    """Create inbox notifications and push jobs for accepted contacts.
+    """Create inbox notifications and push jobs for accepted connections.
 
     Joins the caller's database transaction. Does not commit or send FCM.
     """
@@ -115,7 +115,7 @@ def record_emergency_alert_events(
             source_id=alert.id,
             created_at=created_at,
             title="Emergency alert",
-            message="An emergency contact has triggered a SafeCircle panic alert.",
+            message="A SafeCircle connection has triggered a panic alert.",
         )
 
         db.add(notification)
@@ -138,6 +138,49 @@ def record_emergency_alert_events(
         created_count += 1
 
     return created_count
+
+
+def record_emergency_acknowledgement_event(
+    db: Session, *, alert: Alert, acknowledgement: AlertAcknowledgement,
+    responder: User, created_at: datetime,
+) -> Notification | None:
+    """Persist one owner inbox event and device jobs for an accepted responder."""
+    if alert.kind != "panic" or acknowledgement.alert_id != alert.id or responder.id == alert.user_id:
+        raise ValueError("Invalid emergency acknowledgement event")
+    accepted = db.scalar(select(EmergencyContactLink.id).where(
+        EmergencyContactLink.status == "accepted",
+        or_(
+            (EmergencyContactLink.inviter_user_id == alert.user_id)
+            & (EmergencyContactLink.invitee_user_id == responder.id),
+            (EmergencyContactLink.invitee_user_id == alert.user_id)
+            & (EmergencyContactLink.inviter_user_id == responder.id),
+        ),
+    ))
+    if accepted is None:
+        raise ValueError("Responder is not an accepted connection")
+    if db.scalar(select(User.id).where(User.id == alert.user_id)) is None:
+        return None
+    existing = db.scalar(select(Notification).where(
+        Notification.recipient_user_id == alert.user_id,
+        Notification.category == "emergency",
+        Notification.event_type == "emergency.acknowledged",
+        Notification.source_id == acknowledgement.id,
+    ))
+    if existing is not None:
+        return existing
+    name = responder.name.strip() or "A SafeCircle connection"
+    notification = Notification(
+        recipient_user_id=alert.user_id, category="emergency",
+        event_type="emergency.acknowledged", source_id=acknowledgement.id,
+        created_at=created_at, title="A connection is responding",
+        message=f"{name} is on their way to help.",
+    )
+    db.add(notification)
+    db.flush()
+    for device_id in db.scalars(select(Device.id).where(Device.user_id == alert.user_id)):
+        db.add(PushDelivery(notification_id=notification.id, device_id=device_id, next_attempt_at=created_at))
+    db.flush()
+    return notification
 
 
 def recover_one_pending_emergency_event(db: Session) -> bool:

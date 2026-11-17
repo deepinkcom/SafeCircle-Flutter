@@ -95,7 +95,13 @@ def firebase_notification_delivery(token, notification, recipient_uid):
         and getattr(notification, "event_type", None) == "emergency.panic"
     ):
         title = "SafeCircle emergency alert"
-        body = "An emergency contact has triggered a panic alert."
+        body = "A SafeCircle connection has triggered a panic alert."
+    elif (
+        getattr(notification, "category", None) == "emergency"
+        and getattr(notification, "event_type", None) == "emergency.acknowledged"
+    ):
+        title = getattr(notification, "title", "A connection is responding")
+        body = getattr(notification, "message", "A SafeCircle connection is on their way to help.")
     else:
         title = "SafeCircle"
         body = "You have a SafeCircle update."

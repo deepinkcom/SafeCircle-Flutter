@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import '../firebase_bootstrap.dart';
 import '../models/models.dart';
@@ -18,12 +21,32 @@ class AuthFailure implements Exception {
 }
 
 class AuthService {
-  AuthService({FirebaseAuth? auth, UserRepository? users})
+  AuthService(
+      {FirebaseAuth? auth,
+      UserRepository? users,
+      void Function(Map<String, Object?>)? diagnostics})
       : _auth = auth,
-        _users = users;
+        _users = users,
+        _diagnostics = diagnostics;
 
   final FirebaseAuth? _auth;
   final UserRepository? _users;
+  final void Function(Map<String, Object?>)? _diagnostics;
+
+  void _loginDiagnostic(String stage, [String? code]) {
+    final event = <String, Object?>{
+      'event': 'safe_circle_login',
+      'stage': stage,
+      if (code != null) 'firebase_exception_code': code,
+    };
+    try {
+      if (_diagnostics != null) {
+        _diagnostics(event);
+      } else {
+        debugPrint(jsonEncode(event));
+      }
+    } catch (_) {/* Diagnostics cannot affect authentication. */}
+  }
 
   bool get isReady => FirebaseBootstrap.isReady;
 
@@ -33,6 +56,7 @@ class AuthService {
 
   void _ensureReady() {
     if (!isReady) {
+      _loginDiagnostic('firebase_initialization_unavailable');
       throw AuthFailure(
         'Firebase is not set up yet. Create a Firebase project, enable '
         'Email/Password and Cloud Firestore, then run flutterfire configure '
@@ -92,31 +116,46 @@ class AuthService {
     }
   }
 
+  Future<UserProfile> logIn({
+    required String email,
+    required String password,
+  }) async {
+    _ensureReady();
+    var stage = 'firebase_sign_in';
+    _loginDiagnostic('${stage}_started');
+    try {
+      final credential = await _firebaseAuth.signInWithEmailAndPassword(
+        email: email.trim(),
+        password: password,
+      );
 
-Future<UserProfile> logIn({
-  required String email,
-  required String password,
-}) async {
-  _ensureReady();
-  try {
-    final credential = await _firebaseAuth.signInWithEmailAndPassword(
-      email: email.trim(),
-      password: password,
-    );
+      final user = credential.user;
+      if (user == null) {
+        throw AuthFailure('Sign-in failed. Please try again.');
+      }
 
-    final user = credential.user;
-    if (user == null) {
-      throw AuthFailure('Sign-in failed. Please try again.');
+      _loginDiagnostic('firebase_sign_in_succeeded');
+      stage = 'firestore_profile';
+      _loginDiagnostic('${stage}_started');
+      final profile = await _profileFor(user);
+      _loginDiagnostic('firestore_profile_succeeded');
+      return profile;
+    } on AuthFailure {
+      rethrow;
+    } on FirebaseAuthException catch (error) {
+      _loginDiagnostic('${stage}_failed', error.code);
+      if (error.code == 'network-request-failed') {
+        throw AuthFailure(
+            'SafeCircle could not reach Firebase sign-in. Check this phone\'s date and time, VPN or Private DNS, then try another network.');
+      }
+      throw AuthFailure(_authMessage(error));
+    } on FirebaseException catch (error) {
+      _loginDiagnostic('${stage}_failed', error.code);
+      throw AuthFailure(error.code == 'permission-denied'
+          ? 'Sign-in succeeded, but SafeCircle could not access your profile. Retry or contact the demonstration administrator.'
+          : 'Sign-in succeeded, but your SafeCircle profile could not be loaded. Retry when Firebase profile access is available.');
     }
-
-    return await _profileFor(user);
-  } on AuthFailure {
-    rethrow;
-  } on FirebaseAuthException catch (error) {
-    throw AuthFailure(_authMessage(error));
   }
-}
-
 
   Future<UserProfile> updateProfile(UserProfile profile) async {
     _ensureReady();
@@ -139,7 +178,31 @@ Future<UserProfile> logIn({
 
   Future<void> logOut() async {
     if (!isReady) return;
-    await _firebaseAuth.signOut();
+    debugPrint(jsonEncode({
+      'event': 'safe_circle_auth_sign_out',
+      'stage': 'firebase_sign_out_attempted',
+    }));
+    try {
+      await _firebaseAuth.signOut();
+      debugPrint(jsonEncode({
+        'event': 'safe_circle_auth_sign_out',
+        'stage': 'firebase_sign_out_succeeded',
+      }));
+    } on FirebaseException catch (error) {
+      debugPrint(jsonEncode({
+        'event': 'safe_circle_auth_sign_out',
+        'stage': 'firebase_sign_out_failed',
+        'firebase_exception_code': error.code,
+      }));
+      rethrow;
+    } catch (error) {
+      debugPrint(jsonEncode({
+        'event': 'safe_circle_auth_sign_out',
+        'stage': 'firebase_sign_out_failed',
+        'exception_type': error.runtimeType.toString(),
+      }));
+      rethrow;
+    }
   }
 
   Future<UserProfile> _profileFor(User user) async {
@@ -176,7 +239,7 @@ Future<UserProfile> logIn({
       case 'network-request-failed':
         return 'Network error. Check your connection and try again.';
       default:
-        return error.message ?? 'Authentication failed. Please try again.';
+        return 'Firebase authentication could not complete. Retry or ask the administrator to check the diagnostic code.';
     }
   }
 }

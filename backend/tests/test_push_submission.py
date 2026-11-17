@@ -10,28 +10,28 @@ from firebase_admin import messaging
 from app.push_submission import bounded_firebase_delivery
 
 
-def child_success(connection, token, notification_id, recipient_uid, category, event_type):
+def child_success(connection, token, notification_id, recipient_uid, category, event_type, title, body):
     connection.send("sent")
     connection.close()
 
 
-def child_invalid(connection, token, notification_id, recipient_uid, category, event_type):
+def child_invalid(connection, token, notification_id, recipient_uid, category, event_type, title, body):
     connection.send("unregistered")
     connection.close()
 
 
-def child_failure(connection, token, notification_id, recipient_uid, category, event_type):
+def child_failure(connection, token, notification_id, recipient_uid, category, event_type, title, body):
     connection.send("failed")
     connection.close()
 
 
-def child_delayed_write(connection, token, notification_id, recipient_uid, category, event_type):
+def child_delayed_write(connection, token, notification_id, recipient_uid, category, event_type, title, body):
     time.sleep(1)
     Path(recipient_uid).write_text("late synthetic side effect")
     connection.send("sent")
 
 
-def child_requires_emergency(connection, token, notification_id, recipient_uid, category, event_type):
+def child_requires_emergency(connection, token, notification_id, recipient_uid, category, event_type, title, body):
     connection.send(
         "sent" if (category, event_type) == ("emergency", "emergency.panic") else "failed"
     )

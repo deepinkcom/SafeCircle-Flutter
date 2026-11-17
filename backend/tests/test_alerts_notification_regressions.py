@@ -6,6 +6,7 @@ spatial operators. Any notification-table access or push would fail these fakes.
 """
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -24,6 +25,9 @@ class Rows:
     def all(self):
         return self.values
 
+    def one(self):
+        return self.values[0]
+
 
 class AlertStore:
     def __init__(self):
@@ -37,6 +41,7 @@ class AlertStore:
         )
         self.ack = None
         self.accepted_link = None
+        self.accepted_owner_ids = set()
         self.added = []
         self.commits = 0
         self.nearby_sql = None
@@ -51,6 +56,9 @@ class AlertStore:
         if isinstance(obj, AlertAcknowledgement):
             obj.created_at = datetime.now(timezone.utc)
             self.ack = obj
+
+    def flush(self):
+        pass
 
     def commit(self):
         self.commits += 1
@@ -94,7 +102,7 @@ class AlertStore:
         entity = statement.column_descriptions[0]["entity"]
 
         if entity is EmergencyContactLink:
-            return Rows([])  # No accepted emergency contacts in this test.
+            return Rows(self.accepted_owner_ids)
 
         assert entity is Alert
         return Rows([])
@@ -106,6 +114,9 @@ class AlertStore:
             self.nearby_sql = str(sql)
             self.nearby_params = sql.params
             return Rows([(self.alert, 500.0, 0.0, 0.0)])
+
+        if "ST_Y" in str(sql):
+            return Rows([SimpleNamespace(latitude=0.0, longitude=0.0)])
 
         assert "alert_acknowledgements" in str(sql)
         return Rows([(self.ack, self.alert)] if self.ack else [])
@@ -139,7 +150,7 @@ def test_panic_creation_saves_alert_without_accepted_contacts(emergency):
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["status"] == "active"
     assert response.json()["user_id"] == 1
     assert len(store.added) == 1
@@ -182,7 +193,12 @@ def test_resolution_remains_owner_only_and_does_not_add_notifications(emergency)
     assert store.commits == 1
 
 
-def test_acknowledgement_remains_separate_and_history_is_real_activity(emergency):
+def test_acknowledgement_is_idempotent_and_history_is_real_activity(emergency, monkeypatch):
+    # Notification persistence is exercised with the real database fixture in
+    # test_emergency_notification_events; this fake store isolates row locking.
+    monkeypatch.setattr(
+        "app.alerts.record_emergency_acknowledgement_event", lambda *_args, **_kwargs: None
+    )
     client, store = emergency
     store.accepted_link = 1
 
@@ -190,7 +206,7 @@ def test_acknowledgement_remains_separate_and_history_is_real_activity(emergency
 
     response = client.post("/alerts/7/acknowledge")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["status"] == "on_my_way"
     locked_sql = [
         str(statement.compile(dialect=postgresql.dialect()))
@@ -214,24 +230,80 @@ def test_acknowledgement_remains_separate_and_history_is_real_activity(emergency
     assert len(history) == 1
     assert history[0]["kind"] == "nearby_received"
     assert history[0]["alert_id"] == store.alert.id
+    assert history[0]["location_label"] is None
 
 
-def test_nearby_retains_existing_spatial_rules_without_connection_recipient_expansion(
-    emergency,
-):
+def test_nearby_redacts_exact_location_from_unaccepted_users(emergency):
     client, store = emergency
 
     response = client.get("/alerts/nearby?lat=0&lng=0&radius_km=1")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
     assert response.json()[0]["id"] == 7
+    assert response.json()[0]["latitude"] is None
+    assert response.json()[0]["longitude"] is None
+    assert response.json()[0]["location_label"] is None
+    assert response.json()[0]["distance_km"] == 0.5
+    assert "alerts.user_id !=" in store.nearby_sql
+    assert "ST_DWithin" in store.nearby_sql
+    assert store.nearby_params["user_id_1"] == 1
+    assert store.nearby_params["status_1"] == "active"
+    assert 1000 in store.nearby_params.values()
+    assert store.added == []
+    assert store.commits == 0
+
+
+def test_nearby_returns_exact_location_to_accepted_connection(emergency):
+    client, store = emergency
+    store.accepted_owner_ids = {2}
+
+    response = client.get("/alerts/nearby?lat=0&lng=0&radius_km=1")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()[0]["id"] == 7
+    assert response.json()[0]["latitude"] == 0.0
+    assert response.json()[0]["longitude"] == 0.0
+    assert response.json()[0]["location_label"] == "Synthetic area"
     assert "alerts.user_id !=" in store.nearby_sql
     assert "alerts.status =" in store.nearby_sql
     assert "ST_DWithin" in store.nearby_sql
     assert store.nearby_params["user_id_1"] == 1
     assert store.nearby_params["status_1"] == "active"
     assert 1000 in store.nearby_params.values()
-    assert "emergency_contact_links" not in store.nearby_sql
-    assert "notifications" not in store.nearby_sql
     assert store.added == []
     assert store.commits == 0
+
+
+def test_location_updates_are_owner_only_and_active_only(emergency):
+    client, store = emergency
+    payload = {"latitude": -33.9, "longitude": 18.4}
+    assert client.post("/alerts/7/location", json=payload).status_code == 404
+    assert store.commits == 0
+
+    store.alert.user_id = 1
+    response = client.post("/alerts/7/location", json=payload)
+    assert response.status_code == 200
+    assert response.json() == {"id": 7, "status": "active"}
+    assert store.alert.location is not None
+    assert store.commits == 1
+
+    store.alert.status = "resolved"
+    assert client.post("/alerts/7/location", json=payload).status_code == 404
+
+
+def test_location_reads_require_owner_or_accepted_connection(emergency):
+    client, store = emergency
+    assert client.get("/alerts/7/location").status_code == 404
+
+    store.accepted_link = 1
+    response = client.get("/alerts/7/location")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["latitude"] == 0.0
+    assert response.json()["longitude"] == 0.0
+
+    store.accepted_link = None
+    store.alert.status = "resolved"
+    assert client.get("/alerts/7/location").status_code == 404

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -7,21 +8,34 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
 import 'api_failure.dart';
+import 'installation_identity.dart';
 import '../models/app_notification.dart';
+
+class DeviceCleanupUnverified implements Exception {
+  const DeviceCleanupUnverified(this.message);
+
+  final String message;
+}
 
 class NotificationService {
   NotificationService({
     FirebaseMessaging? messaging,
     ApiService? apiService,
+    InstallationIdentity? installationIdentity,
     String? Function()? currentUserId,
+    void Function(Map<String, Object?> event)? diagnostics,
   })  : _currentUserId =
             currentUserId ?? (() => FirebaseAuth.instance.currentUser?.uid),
         _messaging = messaging,
-        _apiService = apiService ?? ApiService();
+        _apiService = apiService ?? ApiService(),
+        _installationIdentity = installationIdentity ?? InstallationIdentity(),
+        _diagnostics = diagnostics;
 
   final FirebaseMessaging? _messaging;
   final ApiService _apiService;
+  final InstallationIdentity _installationIdentity;
   final String? Function() _currentUserId;
+  final void Function(Map<String, Object?> event)? _diagnostics;
   String? _boundUser;
   bool _disposed = false;
   bool _detaching = false;
@@ -29,6 +43,32 @@ class NotificationService {
   final List<_DeviceSession> _retired = [];
   Future<void> _tail = Future<void>.value();
   Future<void>? _detachTransport;
+
+  void _logCleanup(String stage, [Map<String, Object?> fields = const {}]) {
+    final event = <String, Object?>{
+      'event': 'safe_circle_logout_cleanup',
+      'stage': stage,
+      ...fields,
+    };
+    try {
+      if (_diagnostics case final diagnostics?) {
+        diagnostics(event);
+      } else {
+        debugPrint(jsonEncode(event));
+      }
+    } catch (_) {
+      // Diagnostics must never change whether privacy cleanup succeeds.
+    }
+  }
+
+  void _logCleanupException(String stage, Object error) {
+    _logCleanup(stage, {
+      'exception_type': error is TimeoutException
+          ? 'TimeoutException'
+          : error.runtimeType.toString(),
+      if (error is FirebaseException) 'firebase_exception_code': error.code,
+    });
+  }
 
   String? _signedInUser() {
     try {
@@ -52,12 +92,28 @@ class NotificationService {
   }
 
   Future<void> _cleanSession(_DeviceSession session) async {
-    if (session.tokens.isNotEmpty) {
-      if (_signedInUser() == session.owner) {
+    _logCleanup('installation_cleanup_started', {
+      'previously_registered_token_known': session.tokens.isNotEmpty,
+    });
+    try {
+      session.installationId ??= await _installationIdentity.id;
+    } catch (error) {
+      _logCleanupException('installation_id_unavailable', error);
+      throw const DeviceCleanupUnverified(
+          'SafeCircle could not access this phone\'s secure installation record. Keep this account signed in and retry sign out.');
+    }
+
+    _logCleanup('retired_session_cleanup_started', {
+      'previously_registered_token_known': session.tokens.isNotEmpty,
+    });
+    if (_signedInUser() == session.owner) {
+      if (session.auth != null) {
         // Normal logout refreshes the old owner's bearer before sign-out.
         try {
           final fresh = await _apiService.openDeviceRegistrationSession(
-              isCurrent: () => _signedInUser() == session.owner);
+              isCurrent: () => _signedInUser() == session.owner,
+              onUnregisterResponseStatus: (statusCode) => _logCleanup(
+                  'backend_delete_response', {'api_http_status': statusCode}));
           session.auth?.close();
           session.auth = fresh;
         } on ApiFailure {
@@ -66,16 +122,104 @@ class NotificationService {
           if (session.auth == null) rethrow;
         }
       }
-      final auth = session.auth;
-      if (auth == null) throw const ApiFailure(ApiFailureKind.authentication);
-      for (final token in session.tokens.toList()) {
-        await auth.unregister(token);
-        session.tokens.remove(token);
-        session.cleaned.add(token);
-      }
     }
+
+    if (session.auth == null) {
+      if (_signedInUser() != session.owner) {
+        throw const ApiFailure(ApiFailureKind.authentication);
+      }
+      session.auth = await _apiService.openDeviceRegistrationSession(
+          isCurrent: () => _signedInUser() == session.owner,
+          onUnregisterResponseStatus: (statusCode) => _logCleanup(
+              'backend_cleanup_response', {'api_http_status': statusCode}));
+    }
+
+    if (!session.installationRevoked) {
+      var currentToken = session.registeredToken;
+      InstallationCleanupResult cleanup;
+      try {
+        cleanup = await session.auth!.unregisterInstallation(
+          session.installationId!,
+          currentFcmToken: currentToken,
+        );
+      } on ApiFailure catch (error) {
+        _logCleanup('installation_cleanup_failed', {
+          'api_http_status': error.statusCode,
+          'backend_cleanup_confirmed': false,
+        });
+        if (error.statusCode == 404) {
+          throw const DeviceCleanupUnverified(
+              'This SafeCircle app needs a server update to securely sign out. Keep this account signed in and contact the demonstration administrator.');
+        }
+        rethrow;
+      }
+      if (cleanup.unattributedLegacyRegistrationsRemain &&
+          (currentToken == null || currentToken.trim().isEmpty)) {
+        _logCleanup('legacy_token_lookup_started', {
+          'previously_registered_token_known': false,
+        });
+        try {
+          // Only use the current FCM token to attribute its own legacy row.
+          // The backend rejects a token owned by another account/install.
+          // ignore: deprecated_member_use
+          currentToken = await _firebaseMessaging
+              // ignore: deprecated_member_use
+              .getToken()
+              .timeout(_apiService.requestTimeout);
+          _logCleanup('legacy_token_lookup_finished', {
+            'current_token_retrieval_succeeded': true,
+            'current_token_available':
+                currentToken != null && currentToken.trim().isNotEmpty,
+          });
+        } catch (error) {
+          _logCleanupException('legacy_token_lookup_failed', error);
+          _logCleanup('legacy_token_lookup_result', {
+            'current_token_retrieval_succeeded': false,
+          });
+        }
+        if (currentToken != null && currentToken.trim().isNotEmpty) {
+          cleanup = await session.auth!.unregisterInstallation(
+            session.installationId!,
+            currentFcmToken: currentToken,
+          );
+        }
+      }
+      _logCleanup('installation_cleanup_response', {
+        'backend_cleanup_confirmed': !cleanup.installationRegistrationsRemain &&
+            !(cleanup.unattributedLegacyRegistrationsRemain &&
+                (currentToken == null || currentToken.trim().isEmpty)),
+        'installation_registrations_revoked': cleanup.revokedCount,
+        'installation_registrations_remain':
+            cleanup.installationRegistrationsRemain,
+        'unattributed_legacy_registrations_remain':
+            cleanup.unattributedLegacyRegistrationsRemain,
+      });
+      if (cleanup.installationRegistrationsRemain ||
+          (cleanup.unattributedLegacyRegistrationsRemain &&
+              (currentToken == null || currentToken.trim().isEmpty))) {
+        _logCleanup('cleanup_unverified', {
+          'backend_cleanup_confirmed': false,
+          'previously_registered_token_known': session.tokens.isNotEmpty,
+        });
+        throw const DeviceCleanupUnverified(
+            'SafeCircle found a registration from an older app version that cannot be tied to this phone. This phone\'s identified registrations were revoked, but sign out is paused to prevent notifications reaching the wrong account. Reopen SafeCircle on each previously used phone and account to update its registration, then retry.');
+      }
+      if (cleanup.unattributedLegacyRegistrationsRemain) {
+        _logCleanup('unattributed_legacy_registrations_preserved', {
+          'previously_registered_token_known': session.tokens.isNotEmpty,
+          'current_token_retrieval_succeeded':
+              currentToken != null && currentToken.trim().isNotEmpty,
+        });
+      }
+      session.installationRevoked = true;
+    }
+
     session.auth?.close();
     session.auth = null;
+    _logCleanup('retired_session_cleanup_complete', {
+      'previously_registered_token_known': session.cleaned.isNotEmpty,
+      'backend_cleanup_confirmed': session.installationRevoked,
+    });
   }
 
   Future<void> _cleanRetired() async {
@@ -155,49 +299,53 @@ class NotificationService {
       return running.timeout(_apiService.requestTimeout,
           onTimeout: () => throw const ApiFailure(ApiFailureKind.timeout));
     }
-    final session = _deviceSession ?? _logoutSession;
+    final session = _deviceSession ??
+        _logoutSession ??
+        (_signedInUser() == null ? null : _DeviceSession(_signedInUser()!));
     _logoutSession = session;
+    _logCleanup('cleanup_started', {
+      'previously_registered_token_known': session?.tokens.isNotEmpty ?? false,
+    });
     _detaching = true;
+    _logCleanup('notification_session_detaching');
     bindUser(null);
     final operation = _enqueue(() async {
       // The queue waits for the REAL HTTP transport, even if its UI future
       // timed out. Owned DELETE therefore follows the last registration.
+      // bindUser(null) retires the current session. Remove it from that queue
+      // here so this logout owns exactly one cleanup attempt and does not
+      // close/reopen the captured old-account bearer before the DELETE.
+      if (session != null) _retired.remove(session);
       await _cleanRetired();
-      if (session != null && _signedInUser() == session.owner) {
-        // Also cover an existing installation restored before registration.
-        // ignore: deprecated_member_use
-        final token = await _firebaseMessaging
-            // ignore: deprecated_member_use
-            .getToken()
-            .timeout(_apiService.requestTimeout);
-        if (token != null &&
-            token.trim().isNotEmpty &&
-            !session.cleaned.contains(token)) {
-          final auth = await _apiService.openDeviceRegistrationSession(
-              isCurrent: () => _signedInUser() == session.owner);
-          try {
-            await auth.unregister(token);
-          } on ApiFailure catch (error) {
-            // A Firebase-only account cannot own an FK-enforced device row.
-            if (error.statusCode != 403 ||
-                session.registeredToken != null ||
-                session.tokens.isNotEmpty) {
-              rethrow;
-            }
-          } finally {
-            auth.close();
-          }
-          session.cleaned.add(token);
-        }
-        if (_signedInUser() == session.owner) {
-          // Keep FCM registration tokens, not installation IDs.
+      _logCleanup('notification_session_cleanup_complete');
+      if (session == null) {
+        throw const ApiFailure(ApiFailureKind.authentication);
+      }
+
+      await _cleanSession(session);
+      var fcmTokenRevoked = false;
+      if (_signedInUser() == session.owner) {
+        // Installation-scoped backend revocation cancels queued deliveries.
+        // FCM token deletion is best-effort only after that is confirmed.
+        try {
           // ignore: deprecated_member_use
           await _firebaseMessaging
               // ignore: deprecated_member_use
               .deleteToken()
               .timeout(_apiService.requestTimeout);
+          fcmTokenRevoked = true;
+          _logCleanup('firebase_token_delete_succeeded', {
+            'backend_cleanup_confirmed': session.installationRevoked,
+            'fcm_token_revoked': true,
+          });
+        } catch (error) {
+          _logCleanupException('firebase_token_delete_failed', error);
         }
       }
+      _logCleanup('cleanup_complete', {
+        'backend_cleanup_confirmed': session.installationRevoked,
+        'fcm_token_revoked': fcmTokenRevoked,
+      });
       _logoutSession = null;
     });
     _detachTransport = operation;
@@ -271,7 +419,7 @@ class NotificationService {
         inboxNotification?.eventType == 'emergency.panic') {
       return (
         title: 'SafeCircle emergency alert',
-        body: 'An emergency contact has triggered a panic alert.',
+        body: 'A SafeCircle connection has triggered a panic alert.',
       );
     }
     return (title: 'SafeCircle', body: 'You have a SafeCircle update.');
@@ -316,7 +464,7 @@ class NotificationService {
     await _foregroundSubscription?.cancel();
 
     await _tokenSubscription?.cancel();
-    // Existing backend accepts registration tokens, not installation IDs.
+    // Token refreshes remain bound to this stable installation identifier.
     // ignore: deprecated_member_use
     _tokenSubscription = _firebaseMessaging.onTokenRefresh.listen((token) {
       if (_boundUser != null && _signedInUser() == _boundUser) {
@@ -380,7 +528,10 @@ class NotificationService {
         } while (
             _currentDeviceSession(session) && session.pendingToken != null);
       } finally {
-        if (session.retired) await _cleanSession(session);
+        if (session.retired) {
+          await _cleanSession(session);
+          _retired.remove(session);
+        }
       }
     });
     late final Future<void> transport;
@@ -428,11 +579,27 @@ class NotificationService {
         settings.authorizationStatus != AuthorizationStatus.provisional) {
       throw const ApiFailure(ApiFailureKind.forbidden);
     }
-    // The backend accepts FCM registration tokens, not installation IDs.
-    // ignore: deprecated_member_use
-    final token = hint ??
-        // ignore: deprecated_member_use
-        await _firebaseMessaging.getToken().timeout(_apiService.requestTimeout);
+    try {
+      session.installationId ??= await _installationIdentity.id;
+    } catch (error) {
+      _logCleanupException('installation_id_unavailable', error);
+      throw const DeviceCleanupUnverified(
+          'SafeCircle could not access this phone\'s secure installation record. Restart the app and retry.');
+    }
+    // The FCM token can be unavailable during logout; cleanup uses the
+    // independently persisted installation ID instead.
+    String? token;
+    try {
+      token = hint ??
+          // ignore: deprecated_member_use
+          await _firebaseMessaging
+              // ignore: deprecated_member_use
+              .getToken()
+              .timeout(_apiService.requestTimeout);
+    } catch (error) {
+      _logCleanupException('registration_current_token_lookup_failed', error);
+      rethrow;
+    }
     if (!_currentDeviceSession(session)) return;
     if (token == null || token.trim().isEmpty) {
       throw const ApiFailure(ApiFailureKind.requestRejected);
@@ -448,9 +615,15 @@ class NotificationService {
       await session.auth!.register(
           fcmToken: token,
           platform: platformName,
+          installationId: session.installationId,
           canStart: () => _currentDeviceSession(session));
       if (_currentDeviceSession(session)) session.registeredToken = token;
+      _logCleanup('backend_registration_succeeded');
     } on ApiFailure catch (error) {
+      _logCleanup('backend_registration_failed', {
+        'api_http_status': error.statusCode,
+        'failure_kind': error.kind.name
+      });
       if ({401, 403, 409, 422}.contains(error.statusCode)) {
         session.tokens.remove(token); // A definite rejection did not enroll it.
       }
@@ -463,6 +636,8 @@ class _DeviceSession {
   _DeviceSession(this.owner);
   final String owner;
   bool retired = false;
+  bool installationRevoked = false;
+  String? installationId;
   String? registeredToken, pendingToken;
   final Set<String> tokens = {}, cleaned = {};
   DeviceRegistrationSession? auth;

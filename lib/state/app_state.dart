@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -275,6 +276,11 @@ class AppState extends ChangeNotifier {
     if (!current()) return false;
     try {
       final status = await _api.fetchMyProfileStatus();
+      debugPrint(jsonEncode({
+        'event': 'safe_circle_backend_profile',
+        'stage': 'succeeded',
+        'profile_ready': status.profileReady
+      }));
       if (!current()) return false;
       _backendProfile = status;
       if (status.profileReady && current()) {
@@ -292,6 +298,12 @@ class AppState extends ChangeNotifier {
       _backendProfileError = error is ApiFailure
           ? error
           : const ApiFailure(ApiFailureKind.unexpected);
+      debugPrint(jsonEncode({
+        'event': 'safe_circle_backend_profile',
+        'stage': 'failed',
+        'failure_kind': _backendProfileError!.kind.name,
+        'api_http_status': _backendProfileError!.statusCode
+      }));
       return false;
     } finally {
       if (current()) {
@@ -546,98 +558,14 @@ class AppState extends ChangeNotifier {
     await _auth.logOut();
     if (!_currentAuthentication(generation)) return;
     userProfile = const UserProfile(name: '', city: '', email: '', phone: '');
-    contacts.clear();
+    _stopEmergencyLocationUpdates();
     alertHistory.clear();
     isEmergencyActive = false;
+    activeEmergencyPerson = null;
+    emergencyLocationCache.clear();
+    expiredEmergencyLocations.clear();
     nearbyPerson = null;
     currentLocation = '';
-    notifyListeners();
-  }
-
-  final List<EmergencyContact> contacts = [];
-
-  Future<void> toggleContact(int id) async {
-    final idx = contacts.indexWhere((c) => c.id == id);
-
-    if (idx == -1) return;
-
-    final contact = contacts[idx];
-    final newEnabled = !contact.enabled;
-
-    final data = await _api.updateContact(
-      contactId: id,
-      enabled: newEnabled,
-    );
-
-    contacts[idx] = contact.copyWith(
-      enabled: data['enabled'] as bool? ?? newEnabled,
-    );
-
-    notifyListeners();
-  }
-
-  Future<void> editContact(
-    int id,
-    String name,
-    String relationship,
-    String phone,
-  ) async {
-    final idx = contacts.indexWhere((c) => c.id == id);
-
-    if (idx == -1) return;
-
-    final data = await _api.updateContact(
-      contactId: id,
-      name: name,
-      relationship: relationship,
-      phone: phone,
-    );
-
-    final contact = contacts[idx];
-
-    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
-    var initials = parts.take(2).map((p) => p[0].toUpperCase()).join();
-    if (initials.isEmpty) initials = '?';
-
-    contacts[idx] = EmergencyContact(
-      id: data['id'] as int,
-      name: data['name'] as String,
-      relationship: data['relationship'] as String,
-      phone: data['phone'] as String,
-      initials: initials,
-      avatarColor: contact.avatarColor,
-      enabled: data['enabled'] as bool? ?? contact.enabled,
-    );
-
-    notifyListeners();
-  }
-
-  Future<void> loadContacts() async {
-    final data = await _api.fetchContacts();
-    debugPrint('CONTACTS: backend returned ${data.length} contact(s)');
-
-    contacts
-      ..clear()
-      ..addAll(
-        data.map(
-          (contact) => EmergencyContact(
-            id: contact['id'] as int,
-            name: contact['name'] as String,
-            relationship: contact['relationship'] as String,
-            phone: contact['phone'] as String,
-            initials: contact['name']
-                .toString()
-                .trim()
-                .split(RegExp(r'\s+'))
-                .take(2)
-                .map((part) => part[0].toUpperCase())
-                .join(),
-            avatarColor: const Color(0xFFCDEFE8),
-            enabled: contact['enabled'] as bool? ?? true,
-          ),
-        ),
-      );
-    debugPrint('CONTACTS: AppState now contains ${contacts.length} contact(s)');
     notifyListeners();
   }
 
@@ -720,7 +648,7 @@ class AppState extends ChangeNotifier {
     final person = NearbyPerson(
         id: expectedAlertId,
         ownerUserId: ownerUserId,
-        name: 'Emergency contact',
+        name: 'SafeCircle connection',
         distanceLabel: 'SafeCircle connection',
         locationLabel: row['location_label']?.toString() ?? '',
         status: 'active',
@@ -730,43 +658,167 @@ class AppState extends ChangeNotifier {
     if (!person.hasValidLocation) {
       throw const ApiFailure(ApiFailureKind.invalidResponse);
     }
+    emergencyLocationCache[expectedAlertId] = person;
     return person;
-  }
-
-  Future<void> addContact(
-    String name,
-    String relationship,
-    String phone,
-  ) async {
-    final data = await _api.createContact(
-      name: name,
-      relationship: relationship,
-      phone: phone,
-    );
-
-    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
-    var initials = parts.take(2).map((p) => p[0].toUpperCase()).join();
-    if (initials.isEmpty) initials = '?';
-
-    contacts.add(
-      EmergencyContact(
-        id: data['id'] as int,
-        name: data['name'] as String,
-        relationship: data['relationship'] as String,
-        phone: data['phone'] as String,
-        initials: initials,
-        avatarColor: const Color(0xFFCDEFE8),
-        enabled: data['enabled'] as bool? ?? true,
-      ),
-    );
-
-    notifyListeners();
   }
 
   final List<AlertEvent> alertHistory = [];
 
   bool isEmergencyActive = false;
   NearbyPerson? nearbyPerson;
+  NearbyPerson? activeEmergencyPerson;
+  final Map<int, NearbyPerson> emergencyLocationCache = {};
+  final Set<int> expiredEmergencyLocations = {};
+  StreamSubscription<({double lat, double lng})>? _activeLocationSubscription;
+  DateTime? locationUpdatedAt;
+  String? locationUpdateError;
+
+  /// Restore an owner's active alert from authenticated history and current
+  /// owner-scoped location data; never trusts a client-supplied alert id alone.
+  Future<bool> restoreActiveEmergency(AlertEvent event) async {
+    if (event.kind != AlertKind.emergencySent ||
+        event.status != AlertStatus.active ||
+        !_userProfile.isSignedIn ||
+        _backendProfile?.id == null ||
+        !alertHistory.any((item) =>
+            item.id == event.id &&
+            item.kind == AlertKind.emergencySent &&
+            item.status == AlertStatus.active)) {
+      return false;
+    }
+    final generation = _authGeneration;
+    final data = await _api.fetchAlertLocation(event.id);
+    if (!_currentAuthentication(generation) ||
+        data['id'] != event.id ||
+        data['owner_user_id'] != _backendProfile?.id ||
+        data['status'] != 'active') {
+      return false;
+    }
+    final lat = data['latitude'];
+    final lng = data['longitude'];
+    if (lat != null && lat is! num || lng != null && lng is! num) {
+      throw const ApiFailure(ApiFailureKind.invalidResponse);
+    }
+    final person = NearbyPerson(
+      id: event.id,
+      ownerUserId: _backendProfile!.id,
+      name: _userProfile.name.trim().isEmpty ? 'You' : _userProfile.name.trim(),
+      distanceLabel: 'Your location',
+      locationLabel: event.locationLabel,
+      status: 'active',
+      createdAt: DateTime.now(),
+      latitude: (lat as num?)?.toDouble(),
+      longitude: (lng as num?)?.toDouble(),
+    );
+    if (person.hasValidLocation == false && (lat != null || lng != null)) {
+      throw const ApiFailure(ApiFailureKind.invalidResponse);
+    }
+    isEmergencyActive = true;
+    activeEmergencyPerson = person;
+    locationUpdatedAt = null;
+    locationUpdateError = null;
+    emergencyLocationCache[event.id] = person;
+    expiredEmergencyLocations.remove(event.id);
+    _watchEmergencyLocation(event.id);
+    notifyListeners();
+    return true;
+  }
+
+  void _stopEmergencyLocationUpdates() {
+    _activeLocationSubscription?.cancel();
+    _activeLocationSubscription = null;
+  }
+
+  void _watchEmergencyLocation(int alertId) {
+    _stopEmergencyLocationUpdates();
+    _activeLocationSubscription = _location.watchLocation().listen(
+      (coords) async {
+        if (_disposed ||
+            !isEmergencyActive ||
+            activeEmergencyPerson?.id != alertId) {
+          return;
+        }
+        final generation = _authGeneration;
+        try {
+          await _api.updateAlertLocation(
+              alertId: alertId, latitude: coords.lat, longitude: coords.lng);
+          if (!_currentAuthentication(generation) ||
+              !isEmergencyActive ||
+              activeEmergencyPerson?.id != alertId) {
+            return;
+          }
+          activeEmergencyPerson = activeEmergencyPerson!.copyWith(
+            latitude: coords.lat,
+            longitude: coords.lng,
+            locationUpdatedAt: DateTime.now(),
+          );
+          emergencyLocationCache[alertId] = activeEmergencyPerson!;
+          locationUpdatedAt = DateTime.now();
+          locationUpdateError = null;
+          notifyListeners();
+        } catch (_) {
+          if (!_currentAuthentication(generation)) return;
+          locationUpdateError =
+              'Location update could not be sent. Showing the last reported location.';
+          notifyListeners();
+        }
+      },
+      onError: (_) {
+        locationUpdateError =
+            'Location updates are unavailable. Showing the last reported location.';
+        notifyListeners();
+      },
+    );
+  }
+
+  Future<NearbyPerson?> refreshEmergencyLocation(NearbyPerson person) async {
+    final generation = _authGeneration;
+    final data = await _api.fetchAlertLocation(person.id);
+    if (!_currentAuthentication(generation) || data['id'] != person.id) {
+      return null;
+    }
+    final lat = data['latitude'];
+    final lng = data['longitude'];
+    if (lat is! num || lng is! num) {
+      throw const FormatException('Invalid location response.');
+    }
+    final updated = person.copyWith(
+      latitude: lat.toDouble(),
+      longitude: lng.toDouble(),
+      locationUpdatedAt: DateTime.now(),
+    );
+    if (!updated.hasValidLocation) {
+      throw const FormatException('Invalid location response.');
+    }
+    if (activeEmergencyPerson?.id == person.id) {
+      activeEmergencyPerson = updated;
+    }
+    if (nearbyPerson?.id == person.id) {
+      nearbyPerson = updated;
+    }
+    emergencyLocationCache[person.id] = updated;
+    expiredEmergencyLocations.remove(person.id);
+    locationUpdatedAt = DateTime.now();
+    locationUpdateError = null;
+    notifyListeners();
+    return updated;
+  }
+
+  void expireEmergencyLocation(int alertId) {
+    emergencyLocationCache.remove(alertId);
+    expiredEmergencyLocations.add(alertId);
+    if (activeEmergencyPerson?.id == alertId) {
+      activeEmergencyPerson = activeEmergencyPerson!
+          .copyWith(status: 'resolved', clearLocation: true);
+    }
+    if (nearbyPerson?.id == alertId) {
+      nearbyPerson = nearbyPerson!.copyWith(
+        status: 'resolved',
+        clearLocation: true,
+      );
+    }
+    notifyListeners();
+  }
 
   Future<void> loadCurrentLocation() async {
     debugPrint('LOCATION: loadCurrentLocation() started');
@@ -792,11 +844,13 @@ class AppState extends ChangeNotifier {
   Future<void> startEmergency() async {
     try {
       final coords = await _location.getCurrentLocation();
-
-      currentLocation = await _location.getReadableLocation(
-        lat: coords.lat,
-        lng: coords.lng,
-      );
+      try {
+        currentLocation = await _location.getReadableLocation(
+            lat: coords.lat, lng: coords.lng);
+      } catch (_) {
+        currentLocation =
+            '${coords.lat.toStringAsFixed(5)}, ${coords.lng.toStringAsFixed(5)}';
+      }
 
       final backendAlertId = await _api.sendPanicAlert(
         latitude: coords.lat,
@@ -804,6 +858,22 @@ class AppState extends ChangeNotifier {
       );
 
       isEmergencyActive = true;
+      activeEmergencyPerson = NearbyPerson(
+        id: backendAlertId,
+        ownerUserId: _backendProfile?.id,
+        name: userProfile.name.trim().isEmpty ? 'You' : userProfile.name.trim(),
+        distanceLabel: 'Your current location',
+        locationLabel: currentLocation,
+        status: 'active',
+        createdAt: DateTime.now(),
+        latitude: coords.lat,
+        longitude: coords.lng,
+        locationUpdatedAt: DateTime.now(),
+      );
+      emergencyLocationCache[backendAlertId] = activeEmergencyPerson!;
+      locationUpdatedAt = DateTime.now();
+      locationUpdateError = null;
+      _watchEmergencyLocation(backendAlertId);
 
       alertHistory.insert(
         0,
@@ -818,6 +888,7 @@ class AppState extends ChangeNotifier {
       );
 
       notifyListeners();
+      unawaited(contactLinks.loadAcceptedRelationships());
     } catch (e, stackTrace) {
       debugPrint('EMERGENCY: failed to start: $e');
       debugPrintStack(stackTrace: stackTrace);
@@ -841,18 +912,30 @@ class AppState extends ChangeNotifier {
     }
 
     isEmergencyActive = false;
+    _stopEmergencyLocationUpdates();
+    activeEmergencyPerson = null;
+    if (idx != -1) {
+      final resolvedId = alertHistory[idx].id;
+      emergencyLocationCache.remove(resolvedId);
+      expiredEmergencyLocations.add(resolvedId);
+    }
     notifyListeners();
   }
 
   Future<void> resolveAlertById(int alertId) async {
+    await _api.resolveAlert(alertId);
     final idx = alertHistory.indexWhere((e) => e.id == alertId);
-
     if (idx != -1) {
       alertHistory[idx] =
           alertHistory[idx].copyWith(status: AlertStatus.resolved);
     }
-
-    await _api.resolveAlert(alertId);
+    if (activeEmergencyPerson?.id == alertId) {
+      isEmergencyActive = false;
+      _stopEmergencyLocationUpdates();
+      activeEmergencyPerson = null;
+    }
+    emergencyLocationCache.remove(alertId);
+    expiredEmergencyLocations.add(alertId);
 
     notifyListeners();
   }
@@ -889,7 +972,7 @@ class AppState extends ChangeNotifier {
         ownerUserId: alert['owner_user_id'] is int
             ? alert['owner_user_id'] as int
             : null,
-        name: 'Emergency nearby',
+        name: _acceptedConnectionName(alert['owner_user_id']),
         distanceLabel: '${alert['distance_km']} km away',
         locationLabel: alert['location_label']?.toString() ?? '',
         status: alert['status']?.toString() ?? 'active',
@@ -902,13 +985,25 @@ class AppState extends ChangeNotifier {
         longitude: double.tryParse(
           alert['longitude']?.toString() ?? '',
         ),
+        locationUpdatedAt: DateTime.now(),
       );
+      emergencyLocationCache[nearbyPerson!.id] = nearbyPerson!;
 
       notifyListeners();
     } catch (error, stackTrace) {
       debugPrint('NEARBY ERROR: $error');
       debugPrint('$stackTrace');
     }
+  }
+
+  String _acceptedConnectionName(Object? ownerId) {
+    if (ownerId is! int) return 'Emergency nearby';
+    final match = contactLinks.accepted.items.where(
+      (link) => link.isAccepted && link.otherUserId == ownerId,
+    );
+    if (match.isEmpty) return 'Emergency nearby';
+    final name = match.first.otherUser?.name.trim() ?? '';
+    return name.isEmpty ? 'SafeCircle connection' : name;
   }
 
   Future<void> acknowledgeNearbyAlert(

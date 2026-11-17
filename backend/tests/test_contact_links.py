@@ -13,7 +13,7 @@ from geoalchemy2 import Geography
 from app.auth import get_db
 from app.contact_links import ContactLinkResponse, _link_response, _link_responses, router
 from app.contacts import router as contacts_router
-from app.models import Alert, EmergencyContact, Device, EmergencyContactLink, Notification, PushDelivery, User
+from app.models import Alert, EmergencyContact, Device, DeviceInstallation, EmergencyContactLink, Notification, PushDelivery, User
 
 
 @compiles(Geography, "sqlite")
@@ -55,7 +55,7 @@ def database(tmp_path):
     Alert.__table__.c.location.type.spatial_index = False
 
     # Exclude unrelated PostGIS tables; use the real user/contact/link models.
-    for model in (User, EmergencyContact, EmergencyContactLink, Device, Alert, Notification, PushDelivery):
+    for model in (User, EmergencyContact, EmergencyContactLink, Device, DeviceInstallation, Alert, Notification, PushDelivery):
         model.__table__.create(engine)
     with Session(engine) as db:
         db.add_all([
