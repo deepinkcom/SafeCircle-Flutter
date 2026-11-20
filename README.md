@@ -8,6 +8,23 @@ SafeCircle is designed to improve personal safety through real-time communicatio
 
 **Repository:** https://github.com/deepinkcom/SafeCircle-Flutter
 
+### Deep Ink CRM – User Access Details
+
+The following user accounts have been created to provide access to the **Deep Ink CRM system**. Each account has been assigned a specific role and corresponding access permissions to facilitate system testing and verification of role-based functionality.
+
+- **Manager:** ManagerTest LastnameC | User ID: DIC02 | Email: testmanager@deepink.org | Role: Manager | Status: Active
+- **Staff:** StaffTest LastnameB | User ID: DIC03 | Email: stafftest@deepink.org | Role: Staff | Status: Active
+- **Administrator:** TestAdmin LastnameA | User ID: DIC04 | Email: testadmin@deepink.org | Role: Administrator | Status: To be confirmed
+
+**CRM Login Credentials**
+
+- **Username:** The assigned email addresses above
+- **Password:** `i5mtTfKyiL4wZBe`
+
+All users can log in using their respective email addresses and the temporary password provided above. These accounts are intended to verify CRM access, user permissions, and system functionality across the Administrator, Manager, and Staff roles.
+
+**Important:** The password is provided for temporary testing purposes and will be removed or replaced at a later stage. Users are requested to keep their login credentials confidential and access the system only for authorised activities.
+
 ## 1. Technology Stack
 
 | Layer | Technology | Purpose |
