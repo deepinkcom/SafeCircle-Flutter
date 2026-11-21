@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import 'password_screens.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen(
-      {super.key, required this.onLogIn, required this.onCreateAccount});
+      {super.key,
+      required this.onLogIn,
+      required this.onCreateAccount,
+      this.onGoogleSignIn,
+      this.onPasswordReset});
 
   final Future<String?> Function(String email, String password) onLogIn;
   final VoidCallback onCreateAccount;
+  final Future<String?> Function()? onGoogleSignIn;
+  final Future<String?> Function(String email)? onPasswordReset;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -31,6 +38,25 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     final error = await widget.onLogIn(email, password);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = error;
+    });
+  }
+
+  Future<void> _googleSignIn() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    String? error;
+    try {
+      error = await widget.onGoogleSignIn!();
+    } catch (_) {
+      error = 'Google sign-in could not complete. Please try again.';
+    }
     if (!mounted) return;
     setState(() {
       _busy = false;
@@ -94,15 +120,21 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Text('Forgot Password?',
-                      style: TextStyle(
-                          color: AppColors.tealPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600)),
-                ],
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _busy || widget.onPasswordReset == null
+                      ? null
+                      : () {
+                          Navigator.of(context).push(MaterialPageRoute<void>(
+                            builder: (_) => ForgotPasswordScreen(
+                              initialEmail: _email.text.trim(),
+                              onSend: widget.onPasswordReset!,
+                            ),
+                          ));
+                        },
+                  child: const Text('Forgot Password?'),
+                ),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
@@ -157,7 +189,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 width: double.infinity,
                 height: 56,
                 child: OutlinedButton.icon(
-                  onPressed: widget.onCreateAccount,
+                  onPressed: _busy ? null : widget.onCreateAccount,
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: AppColors.tealPrimary),
                     shape: RoundedRectangleBorder(
@@ -174,6 +206,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
+              if (widget.onGoogleSignIn != null) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: OutlinedButton(
+                    onPressed: _busy ? null : _googleSignIn,
+                    child: const Text('Continue with Google'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               Card(
                 color: AppColors.tealBg,

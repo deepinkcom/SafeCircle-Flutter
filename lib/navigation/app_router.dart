@@ -1,5 +1,6 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import '../screens/activate_panic_screen.dart';
 import '../screens/alert_history_screen.dart';
@@ -226,6 +227,18 @@ class _AuthFlowState extends State<_AuthFlow> {
         );
       case _AuthScreen.login:
         return LoginScreen(
+          onPasswordReset: context.read<AppState>().sendPasswordReset,
+          onGoogleSignIn:
+              kIsWeb || defaultTargetPlatform == TargetPlatform.android
+                  ? () async {
+                      final error =
+                          await context.read<AppState>().logInWithGoogle();
+                      if (!mounted || error != null) return error;
+                      await _registerNotificationsSafely();
+                      _enterMain();
+                      return null;
+                    }
+                  : null,
           onLogIn: (email, password) async {
             final error = await context.read<AppState>().logIn(
                   email: email,

@@ -7,6 +7,7 @@ import '../widgets/top_brand_bar.dart';
 import '../widgets/backend_profile_banner.dart';
 import '../widgets/profile_photo_avatar.dart';
 import '../widgets/profile_photo_editor.dart';
+import 'password_screens.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen(
@@ -26,6 +27,20 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  void _changePassword() {
+    final app = context.read<AppState>();
+    final owner = app.userProfile.uid;
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => ChangePasswordScreen(
+              passwordEnabled: app.canChangePassword,
+              onChange: (current, next) => app.changePassword(
+                ownerUid: owner,
+                currentPassword: current,
+                newPassword: next,
+              ),
+            )));
+  }
+
   Future<void> _editProfilePicture() async {
     final app = context.read<AppState>();
     final uid = app.userProfile.uid;
@@ -159,6 +174,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: 'Personal Details',
               subtitle: 'Update your name, phone and city',
               onTap: _editPersonalDetails,
+            ),
+            _SettingsRow(
+              icon: Icons.lock_outline,
+              title: 'Change Password',
+              subtitle: 'Manage your sign-in password',
+              onTap: _changePassword,
             ),
             _SettingsRow(
               icon: Icons.shield,

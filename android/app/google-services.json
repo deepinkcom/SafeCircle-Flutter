@@ -12,7 +12,12 @@
           "package_name": "Safe.Circle1"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "926463275124-dqj41gmuiuesud5njbnr0p4uv25efiul.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCnU4dCFjfppak14EqTnbaeW_qqmz-UISQ"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "926463275124-dqj41gmuiuesud5njbnr0p4uv25efiul.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     },
@@ -31,7 +41,20 @@
           "package_name": "com.example.safecircle"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "926463275124-o6ta8j4c963bca9prs8g59o0ms8np85q.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.safecircle",
+            "certificate_hash": "0c131cf88b67b0461ede68be3237c94b9171d024"
+          }
+        },
+        {
+          "client_id": "926463275124-dqj41gmuiuesud5njbnr0p4uv25efiul.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCnU4dCFjfppak14EqTnbaeW_qqmz-UISQ"
@@ -39,7 +62,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "926463275124-dqj41gmuiuesud5njbnr0p4uv25efiul.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
