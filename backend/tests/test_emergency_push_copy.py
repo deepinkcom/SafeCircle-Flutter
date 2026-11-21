@@ -13,13 +13,19 @@ from app.notification_service import firebase_notification_delivery
             "emergency",
             "emergency.panic",
             "SafeCircle emergency alert",
-            "An emergency contact has triggered a panic alert.",
+            "A SafeCircle connection has triggered a panic alert.",
         ),
         (
             "connection",
             "connection.invited",
             "SafeCircle",
             "You have a SafeCircle update.",
+        ),
+        (
+            "emergency",
+            "emergency.acknowledged",
+            "A connection is responding",
+            "Jordan is on their way to help.",
         ),
     ],
 )
@@ -40,6 +46,8 @@ def test_fcm_copy_is_emergency_specific_and_contains_no_location(
             id=17,
             category=category,
             event_type=event_type,
+            title=expected_title if event_type == "emergency.acknowledged" else "A connection is responding",
+            message=expected_body if event_type == "emergency.acknowledged" else "Jordan is on their way to help.",
         ),
         "synthetic-recipient-uid",
     )

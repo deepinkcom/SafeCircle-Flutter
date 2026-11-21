@@ -27,6 +27,7 @@ from app.push_worker import _claim, _deliver_claim, deliver_one
 
 PARENT = "c7f0a3e5b921"
 REVISION = "d9a4f6b2c730"
+HEAD = "a91b8c7d6e5f"
 pytestmark = pytest.mark.skipif(
     os.environ.get("SAFECIRCLE_RETENTION_POSTGRES") != "1",
     reason="Requires the separately approved disposable PostgreSQL container",
@@ -43,7 +44,7 @@ def pg_database(monkeypatch):
     with admin.begin() as c:
         assert c.scalar(text("SELECT current_database()")) == "safecircle_retention_test_20261109"
         c.execute(text(f'CREATE SCHEMA "{schema}"'))
-    test_url = url.update_query_dict({"options": f"-csearch_path={schema}"})
+    test_url = url.update_query_dict({"options": f"-csearch_path={schema},public"})
     engine = create_engine(test_url, hide_parameters=True)
     monkeypatch.setattr(settings, "database_url", test_url.render_as_string(hide_password=False))
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
@@ -54,6 +55,8 @@ def pg_database(monkeypatch):
             # Historical baseline: the c7 revision adds token uniqueness itself.
             c.execute(text("CREATE TABLE devices (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), "
                            "fcm_token VARCHAR(500) NOT NULL, platform VARCHAR(50) NOT NULL, registered_at TIMESTAMP NOT NULL)"))
+        with engine.begin() as c:
+            c.execute(text("CREATE TABLE alerts (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), kind VARCHAR(50), status VARCHAR(50) NOT NULL, location geography(POINT,4326), location_label VARCHAR(255), created_at TIMESTAMP, resolved_at TIMESTAMPTZ)"))
         command.upgrade(config, PARENT)
         with Session(engine) as db:
             db.add_all([User(id=i, firebase_uid=f"synthetic-uid-{i}", name=f"User {i}",
@@ -69,23 +72,21 @@ def pg_database(monkeypatch):
 
 def seed(engine, statuses=("sent", "failed", "cancelled", "pending", "sending")):
     with Session(engine) as db:
-        device = Device(user_id=2, fcm_token="synthetic-retention-device", platform="android")
-        db.add(device)
-        db.flush()
+        device_id = db.scalar(text("INSERT INTO devices (user_id,fcm_token,platform,registered_at) VALUES (2,'synthetic-retention-device','android',now()) RETURNING id"))
         ids = []
         for i, status in enumerate(statuses, 1):
             notice = Notification(recipient_user_id=2, category="connection", event_type="connection.invited",
                                   source_id=i, title="Synthetic event", message="Isolated fixture only")
             db.add(notice)
             db.flush()
-            job = PushDelivery(notification_id=notice.id, device_id=device.id, status=status,
+            job = PushDelivery(notification_id=notice.id, device_id=device_id, status=status,
                                attempts=2 if status != "pending" else 0,
                                next_attempt_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
             db.add(job)
             db.flush()
             ids.append(job.id)
         db.commit()
-        return device.id, ids
+        return device_id, ids
 
 
 def test_logout_preserves_history_and_cancels_unfinished(pg_database):
@@ -110,7 +111,7 @@ def test_migration_retains_rows_and_other_constraints(pg_database):
         before = list(c.execute(select(PushDelivery.__table__).order_by(PushDelivery.id)))
     command.upgrade(config, "head")
     with engine.connect() as c:
-        assert c.scalar(text("SELECT version_num FROM alembic_version")) == REVISION
+        assert c.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
         assert list(c.scalars(select(PushDelivery.id).order_by(PushDelivery.id))) == ids
         assert list(c.execute(select(PushDelivery.__table__).order_by(PushDelivery.id))) == before
     inspector = inspect(engine)
@@ -127,7 +128,7 @@ def test_migration_retains_rows_and_other_constraints(pg_database):
 
 def upgrade_and_seed(pg_database, statuses=("pending",)):
     engine, config = pg_database
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     device_id, ids = seed(engine, statuses)
     return engine, config, device_id, ids
 
@@ -258,7 +259,7 @@ def test_safe_downgrade_roundtrip_retains_attached_history(pg_database):
     command.downgrade(config, PARENT)
     inspector = inspect(engine)
     assert not next(c for c in inspector.get_columns("push_deliveries") if c["name"] == "device_id")["nullable"]
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     with Session(engine) as db:
         assert (db.get(PushDelivery, ids[0]).status, db.get(PushDelivery, ids[0]).attempts) == ("sent", 2)
 
@@ -270,7 +271,7 @@ def test_downgrade_refuses_detached_history_without_changing_rows_or_revision(pg
     with pytest.raises(RuntimeError, match="Detached delivery history prevents downgrade"):
         command.downgrade(config, PARENT)
     with Session(engine) as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == REVISION
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
         job = db.get(PushDelivery, ids[0])
         assert (job.status, job.attempts, job.device_id) == ("sent", 2, None)
     assert any(i["name"] == "ix_push_delivery_device" for i in inspect(engine).get_indexes("push_deliveries"))
@@ -422,6 +423,7 @@ def test_offline_downgrade_sql_preserves_or_refuses_history(pg_database, detache
             unregister_device(DeviceRemove(fcm_token="synthetic-retention-device"), db.get(User, 2), db)
     buffer = StringIO()
     config.output_buffer = buffer
+    command.downgrade(config, REVISION)
     command.downgrade(config, f"{REVISION}:{PARENT}", sql=True)
     raw = engine.raw_connection()
     try:

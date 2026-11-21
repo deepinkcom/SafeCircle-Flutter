@@ -8,8 +8,14 @@ import '../widgets/top_brand_bar.dart';
 enum _HistoryFilter { all, sent, received }
 
 class AlertHistoryScreen extends StatefulWidget {
-  const AlertHistoryScreen({super.key, this.notificationSession});
+  const AlertHistoryScreen(
+      {super.key,
+      this.notificationSession,
+      this.onOpenNotifications,
+      this.onOpenActiveAlert});
   final int? notificationSession;
+  final VoidCallback? onOpenNotifications;
+  final Future<void> Function(AlertEvent)? onOpenActiveAlert;
 
   @override
   State<AlertHistoryScreen> createState() => _AlertHistoryScreenState();
@@ -42,7 +48,12 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
     }).toList();
 
     return Scaffold(
-      appBar: const TopBrandBar(),
+      appBar: TopBrandBar(
+        onBellTap: widget.onOpenNotifications,
+        unreadCount: state.notifications.unreadCount,
+        countUnavailable: state.notifications.countError != null ||
+            state.notifications.isAccessBlocked,
+      ),
       body: SafeArea(
         top: false,
         child: Column(
@@ -101,6 +112,16 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
                   onResolve: () => context
                       .read<AppState>()
                       .resolveAlertById(filtered[index].id),
+                  onOpen: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => AlertDetailsScreen(
+                        event: filtered[index],
+                        onOpenActiveAlert: widget.onOpenActiveAlert == null
+                            ? null
+                            : () => widget.onOpenActiveAlert!(filtered[index]),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -163,10 +184,12 @@ class _FilterPill extends StatelessWidget {
 }
 
 class _AlertCard extends StatelessWidget {
-  const _AlertCard({required this.event, required this.onResolve});
+  const _AlertCard(
+      {required this.event, required this.onResolve, required this.onOpen});
 
   final AlertEvent event;
   final Future<void> Function() onResolve;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -222,83 +245,143 @@ class _AlertCard extends StatelessWidget {
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
-              alignment: Alignment.center,
-              child: Icon(icon, color: iconTint, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration:
+                    BoxDecoration(color: iconBg, shape: BoxShape.circle),
+                alignment: Alignment.center,
+                child: Icon(icon, color: iconTint, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(event.title,
+                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(event.timeLabel,
+                        style: Theme.of(context).textTheme.bodyMedium),
+                    Row(
+                      children: [
+                        const Icon(Icons.location_on,
+                            color: AppColors.textMuted, size: 12),
+                        const SizedBox(width: 3),
+                        Text(event.locationLabel,
+                            style: const TextStyle(
+                                color: AppColors.textMuted, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(event.title,
-                      style: Theme.of(context).textTheme.titleMedium),
-                  Text(event.timeLabel,
-                      style: Theme.of(context).textTheme.bodyMedium),
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on,
-                          color: AppColors.textMuted, size: 12),
-                      const SizedBox(width: 3),
-                      Text(event.locationLabel,
-                          style: const TextStyle(
-                              color: AppColors.textMuted, fontSize: 12)),
-                    ],
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: statusBg,
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Text(statusLabel,
+                        style: TextStyle(
+                            color: statusColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
                   ),
+                  if (event.status == AlertStatus.resolved ||
+                      event.status == AlertStatus.acknowledged) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle,
+                            color: AppColors.tealPrimary, size: 12),
+                        const SizedBox(width: 3),
+                        Text(
+                          event.status == AlertStatus.resolved
+                              ? 'Resolved'
+                              : 'Acknowledged',
+                          style: const TextStyle(
+                              color: AppColors.tealPrimary, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                      color: statusBg, borderRadius: BorderRadius.circular(12)),
-                  child: Text(statusLabel,
-                      style: TextStyle(
-                          color: statusColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600)),
-                ),
-                if (event.status == AlertStatus.resolved ||
-                    event.status == AlertStatus.acknowledged) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(Icons.check_circle,
-                          color: AppColors.tealPrimary, size: 12),
-                      const SizedBox(width: 3),
-                      Text(
-                        event.status == AlertStatus.resolved
-                            ? 'Resolved'
-                            : 'Acknowledged',
-                        style: const TextStyle(
-                            color: AppColors.tealPrimary, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-            if (canResolve)
-              TextButton(
-                onPressed: onResolve,
-                child: const Text('Resolve'),
-              )
-            else
-              const Icon(Icons.chevron_right, color: AppColors.textMuted),
-          ],
+              if (canResolve)
+                TextButton(
+                  onPressed: () => onResolve(),
+                  child: const Text('Resolve'),
+                )
+              else
+                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+class AlertDetailsScreen extends StatelessWidget {
+  const AlertDetailsScreen(
+      {super.key, required this.event, this.onOpenActiveAlert});
+  final AlertEvent event;
+  final Future<void> Function()? onOpenActiveAlert;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = event.kind == AlertKind.emergencySent &&
+        event.status == AlertStatus.active;
+    final resolved = event.status == AlertStatus.resolved;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Alert details')),
+      body: ListView(padding: const EdgeInsets.all(24), children: [
+        Text(event.title, style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 16),
+        Text(
+            'Status: ${resolved ? 'Emergency ended' : _statusText(event.status)}'),
+        const SizedBox(height: 8),
+        Text('Recorded: ${event.timeLabel}'),
+        if (event.locationLabel.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Recorded location: ${event.locationLabel}'),
+        ],
+        if (resolved) ...[
+          const SizedBox(height: 16),
+          const Text(
+              'This emergency has ended. The recorded location is historical.'),
+        ],
+        if (event.kind == AlertKind.nearbyReceived) ...[
+          const SizedBox(height: 16),
+          const Text(
+              'You acknowledged this emergency. This history entry cannot restart it.'),
+        ],
+        if (active && onOpenActiveAlert != null) ...[
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: () => onOpenActiveAlert!(),
+            icon: const Icon(Icons.warning_amber),
+            label: const Text('Return to active alert'),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  String _statusText(AlertStatus status) => switch (status) {
+        AlertStatus.active => 'Active',
+        AlertStatus.resolved => 'Resolved',
+        AlertStatus.cancelled => 'Cancelled',
+        AlertStatus.acknowledged => 'Acknowledged',
+      };
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,12 +9,31 @@ import 'package:http/testing.dart';
 import 'package:safecircle/services/api_failure.dart';
 import 'package:safecircle/services/api_service.dart';
 import 'package:safecircle/services/notification_service.dart';
+import 'package:safecircle/services/installation_identity.dart';
+
+class MemoryInstallationStorage implements InstallationIdStorage {
+  String? value;
+  @override
+  Future<String?> read() async => value;
+  @override
+  Future<void> write(String value) async => this.value = value;
+}
+
+http.Response successFor(http.Request request) => request.url.path ==
+        '/devices/installation'
+    ? http.Response(
+        '{"success":true,"revoked_count":0,"installation_registrations_remain":false,"unattributed_legacy_registrations_remain":false}',
+        200)
+    : http.Response(
+        request.method == 'POST' ? '{"id":7,"user_id":1}' : '{"success":true}',
+        200);
 
 class TestMessaging extends Fake implements FirebaseMessaging {
   String token = 'synthetic-fcm-one';
   AuthorizationStatus permission = AuthorizationStatus.authorized;
   Future<String?> Function()? onToken;
   Future<NotificationSettings> Function()? onPermission;
+  Future<void> Function()? onDelete;
   int deleted = 0, reads = 0;
   final refreshed = StreamController<String>.broadcast(sync: true);
   @override
@@ -28,6 +48,7 @@ class TestMessaging extends Fake implements FirebaseMessaging {
   @override
   Future<void> deleteToken() async {
     deleted++;
+    await onDelete?.call();
   }
 
   @override
@@ -51,8 +72,15 @@ class TestMessaging extends Fake implements FirebaseMessaging {
 }
 
 class Service extends NotificationService {
-  Service(TestMessaging messaging, ApiService api, String? Function() user)
-      : super(messaging: messaging, apiService: api, currentUserId: user);
+  Service(TestMessaging messaging, ApiService api, String? Function() user,
+      void Function(Map<String, Object?> event)? diagnostics,
+      {required InstallationIdentity installationIdentity})
+      : super(
+            messaging: messaging,
+            apiService: api,
+            installationIdentity: installationIdentity,
+            currentUserId: user,
+            diagnostics: diagnostics);
   @override
   Future<void> initializeLocalNotifications() async {}
 }
@@ -61,8 +89,11 @@ class Harness {
   String? owner = 'alice';
   final messaging = TestMessaging();
   final requests = <http.Request>[];
+  final diagnostics = <Map<String, Object?>>[];
+  final installationStorage = MemoryInstallationStorage();
   Future<http.Response> Function(http.Request)? respond;
   Future<String?> Function()? auth;
+  Future<String?> Function()? forceAuth;
   late final ApiService api;
   late final Service service;
   Harness({Duration timeout = const Duration(seconds: 1)}) {
@@ -70,17 +101,27 @@ class Harness {
         requestTimeout: timeout,
         tokenProvider: () =>
             auth != null ? auth!() : Future.value('synthetic-auth-$owner'),
+        forceRefreshTokenProvider: () => forceAuth != null
+            ? forceAuth!()
+            : Future.value('synthetic-auth-$owner'),
         client: MockClient((request) async {
           requests.add(request);
           return respond != null
               ? await respond!(request)
-              : http.Response(
-                  request.method == 'POST'
-                      ? '{"id":7,"user_id":1}'
-                      : '{"success":true}',
-                  200);
+              : request.url.path == '/devices/installation'
+                  ? http.Response(
+                      '{"success":true,"revoked_count":0,"installation_registrations_remain":false,"unattributed_legacy_registrations_remain":false}',
+                      200)
+                  : http.Response(
+                      request.method == 'POST'
+                          ? '{"id":7,"user_id":1}'
+                          : '{"success":true}',
+                      200);
         }));
-    service = Service(messaging, api, () => owner)..bindUser(owner);
+    service = Service(messaging, api, () => owner, diagnostics.add,
+        installationIdentity:
+            InstallationIdentity(storage: installationStorage))
+      ..bindUser(owner);
   }
   Future<void> close() async {
     await service.dispose();
@@ -100,6 +141,22 @@ Future<void> tick() async {
 void main() {
   setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.android);
   tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+  test('old backend cannot silently bypass installation cleanup', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.respond = (_) async => http.Response('{"detail":"Not Found"}', 404);
+    await expectLater(
+        h.service.detachDevice(),
+        throwsA(isA<DeviceCleanupUnverified>()
+            .having((e) => e.message, 'message', contains('server update'))));
+    expect(h.messaging.deleted, 0);
+    expect(
+        h.diagnostics.any((e) =>
+            e['stage'] == 'installation_cleanup_failed' &&
+            e['api_http_status'] == 404),
+        isTrue);
+  });
 
   test(
       'account changing during cleanup refresh still uses captured old-owner bearer',
@@ -122,6 +179,159 @@ void main() {
     await h.service.registerDevice();
     expect(h.posts.last.headers['Authorization'], 'Bearer synthetic-auth-bob');
   });
+  test('expired cleanup bearer is force-refreshed once after 401', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    await h.service.registerDevice();
+    h.auth = () async => 'synthetic-expired-alice-bearer';
+    h.forceAuth = () async => 'synthetic-refreshed-alice-bearer';
+    h.respond = (request) async {
+      if (request.method == 'DELETE' &&
+          request.headers['Authorization'] ==
+              'Bearer synthetic-expired-alice-bearer') {
+        return http.Response('private auth detail', 401);
+      }
+      return successFor(request);
+    };
+
+    await h.service.detachDevice();
+
+    expect(h.deletes, hasLength(2));
+    expect(h.deletes.first.headers['Authorization'],
+        'Bearer synthetic-expired-alice-bearer');
+    expect(h.deletes.last.headers['Authorization'],
+        'Bearer synthetic-refreshed-alice-bearer');
+    expect(h.messaging.deleted, 1);
+  });
+  test('missing current token is safe when installation cleanup is confirmed',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.messaging.token = '';
+
+    await h.service.detachDevice();
+
+    expect(h.requests.map((request) => request.url.path),
+        ['/devices/installation']);
+    expect(h.messaging.deleted, 1);
+    expect(
+        h.diagnostics.any((event) =>
+            event['stage'] == 'installation_cleanup_response' &&
+            event['installation_registrations_remain'] == false &&
+            event['backend_cleanup_confirmed'] == true),
+        isTrue);
+    expect(jsonEncode(h.diagnostics), isNot(contains('synthetic-fcm-one')));
+  });
+  test('registration and logout use the same persistent installation id',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    await h.service.registerDevice();
+    final registration =
+        jsonDecode(h.posts.single.body) as Map<String, dynamic>;
+    final installId = registration['installation_id'] as String;
+    expect(installId, matches(RegExp(r'^[0-9a-f]{64}$')));
+    await h.service.detachDevice();
+    final cleanup = h.deletes
+        .singleWhere((request) => request.url.path == '/devices/installation');
+    expect(
+        (jsonDecode(cleanup.body) as Map<String, dynamic>)['installation_id'],
+        installId);
+  });
+  test('FCM token lookup failure blocks cleanup when legacy rows remain',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.respond = (request) async => request.url.path == '/devices/installation'
+        ? http.Response(
+            '{"success":true,"revoked_count":0,"installation_registrations_remain":false,"unattributed_legacy_registrations_remain":true}',
+            200)
+        : successFor(request);
+    h.messaging.onToken = () async =>
+        throw FirebaseException(plugin: 'firebase_messaging', code: 'unknown');
+
+    await expectLater(
+        h.service.detachDevice(), throwsA(isA<DeviceCleanupUnverified>()));
+
+    final failure = h.diagnostics
+        .singleWhere((event) => event['stage'] == 'legacy_token_lookup_failed');
+    expect(failure['firebase_exception_code'], 'unknown');
+    expect(h.requests.map((request) => request.url.path),
+        ['/devices/installation']);
+    expect(jsonEncode(h.diagnostics), isNot(contains('synthetic-fcm-one')));
+  });
+  test('missing token does not sign out when backend reports a registration',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.messaging.token = '';
+    h.respond = (request) async => request.url.path == '/devices/installation'
+        ? http.Response(
+            '{"success":true,"revoked_count":0,"installation_registrations_remain":false,"unattributed_legacy_registrations_remain":true}',
+            200)
+        : successFor(request);
+
+    await expectLater(
+        h.service.detachDevice(), throwsA(isA<DeviceCleanupUnverified>()));
+
+    expect(h.messaging.deleted, 0);
+    expect(h.diagnostics.any((event) => event['stage'] == 'cleanup_unverified'),
+        isTrue);
+  });
+  test(
+      'other-phone legacy registrations do not block cleanup with current token',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.respond = (request) async => request.url.path == '/devices/installation'
+        ? http.Response(
+            '{"success":true,"revoked_count":0,"installation_registrations_remain":false,"unattributed_legacy_registrations_remain":true}',
+            200)
+        : successFor(request);
+    await h.service.detachDevice();
+    expect(h.deletes, hasLength(2));
+    expect(h.messaging.deleted, 1);
+    expect(
+        h.diagnostics.any((event) =>
+            event['stage'] == 'unattributed_legacy_registrations_preserved' &&
+            event['current_token_retrieval_succeeded'] == true),
+        isTrue);
+  });
+  test('upgraded installation revokes its known token if later lookup fails',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    // The new APK's registration refresh discovers and reuses the old row.
+    await h.service.registerDevice();
+    h.messaging.onToken = () async => throw FirebaseException(
+        plugin: 'firebase_messaging', code: 'unavailable');
+    final readsBeforeLogout = h.messaging.reads;
+
+    await h.service.detachDevice();
+
+    expect(h.messaging.reads, readsBeforeLogout);
+    expect(h.deletes, hasLength(1));
+    expect(
+        h.requests
+            .any((request) => request.url.path == '/devices/cleanup-status'),
+        isFalse);
+    expect(
+        h.diagnostics.any((event) =>
+            event['stage'] == 'installation_cleanup_response' &&
+            event['backend_cleanup_confirmed'] == true),
+        isTrue);
+  });
+  test('Android notification permission does not block token cleanup',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.messaging.permission = AuthorizationStatus.denied;
+
+    await h.service.detachDevice();
+
+    expect(h.deletes, hasLength(1));
+    expect(h.messaging.deleted, 1);
+  });
   test(
       'old account epoch cannot enroll after switching away and back to same UID',
       () async {
@@ -131,8 +341,8 @@ void main() {
     h.messaging.onToken = () => token.future;
     final old = h.service.registerDevice();
     await tick();
-    h.owner = 'bob';
-    h.service.bindUser('bob');
+    h.owner = null;
+    h.service.bindUser(null);
     h.owner = 'alice';
     h.service.bindUser('alice');
     token.complete('synthetic-fcm-one');
@@ -201,9 +411,8 @@ void main() {
     final h = Harness();
     addTearDown(h.close);
     final post = Completer<http.Response>();
-    h.respond = (r) async => r.method == 'POST'
-        ? await post.future
-        : http.Response('{"success":true}', 200);
+    h.respond =
+        (r) async => r.method == 'POST' ? await post.future : successFor(r);
     final registration = h.service.registerDevice();
     await tick();
     final logout = h.service.detachDevice();
@@ -227,9 +436,9 @@ void main() {
     int posted = 0;
     h.respond = (r) async => r.method == 'POST' && posted++ == 0
         ? await post.future
-        : http.Response(
-            r.method == 'POST' ? '{"id":8,"user_id":2}' : '{"success":true}',
-            200);
+        : r.method == 'POST'
+            ? http.Response('{"id":8,"user_id":2}', 200)
+            : successFor(r);
     final alice = h.service.registerDevice();
     await tick();
     h.owner = 'bob';
@@ -259,7 +468,7 @@ void main() {
     h.owner = 'bob';
     h.service.bindUser('bob');
     permission.complete(allowed);
-    await old;
+    await expectLater(old, throwsA(isA<ApiFailure>()));
     expect(h.posts, isEmpty);
   });
   test(
@@ -294,9 +503,8 @@ void main() {
     final h = Harness(timeout: const Duration(milliseconds: 40));
     addTearDown(h.close);
     final post = Completer<http.Response>();
-    h.respond = (r) async => r.method == 'POST'
-        ? await post.future
-        : http.Response('{"success":true}', 200);
+    h.respond =
+        (r) async => r.method == 'POST' ? await post.future : successFor(r);
     final pending = h.service.registerDevice();
     await expectLater(pending, throwsA(isA<ApiFailure>()));
     final logout = h.service.detachDevice();
@@ -314,13 +522,30 @@ void main() {
     addTearDown(h.close);
     await h.service.registerDevice();
     bool fail = true;
-    h.respond = (r) async => http.Response(
-        fail ? 'private ignored body' : '{"success":true}', fail ? 503 : 200);
+    h.respond = (r) async =>
+        fail ? http.Response('private ignored body', 503) : successFor(r);
     await expectLater(h.service.detachDevice(), throwsA(isA<ApiFailure>()));
     expect(h.messaging.deleted, 0);
     fail = false;
     await h.service.detachDevice();
     expect(h.messaging.deleted, 1);
+  });
+  test('FCM token rotation failure does not undo confirmed backend cleanup',
+      () async {
+    final h = Harness();
+    addTearDown(h.close);
+    await h.service.registerDevice();
+    h.messaging.onDelete = () async => throw FirebaseException(
+        plugin: 'firebase_messaging', code: 'unavailable');
+
+    await h.service.detachDevice();
+
+    expect(h.deletes, hasLength(1));
+    expect(h.messaging.deleted, 1);
+    final failure = h.diagnostics.singleWhere(
+        (event) => event['stage'] == 'firebase_token_delete_failed');
+    expect(failure['firebase_exception_code'], 'unavailable');
+    expect(jsonEncode(h.diagnostics), isNot(contains('synthetic-fcm-one')));
   });
   test('permission denial creates no enrollment and can recover', () async {
     final h = Harness();
@@ -340,13 +565,14 @@ void main() {
     expect(h.deletes, isEmpty);
     expect(h.messaging.deleted, 0);
   });
-  test('a Firebase-only account can still sign out without a backend profile',
+  test(
+      'an account without a backend profile cannot bypass cleanup authorization',
       () async {
     final h = Harness();
     addTearDown(h.close);
     h.respond = (r) async => http.Response('{}', 403);
     await expectLater(h.service.registerDevice(), throwsA(isA<ApiFailure>()));
-    await h.service.detachDevice();
-    expect(h.messaging.deleted, 1);
+    await expectLater(h.service.detachDevice(), throwsA(isA<ApiFailure>()));
+    expect(h.messaging.deleted, 0);
   });
 }

@@ -39,6 +39,7 @@ from app.push_worker import _claim, _deliver_claim, deliver_one
 
 PARENT = "d9a4f6b2c730"
 REVISION = "e17d6a10bc25"
+HEAD = "a91b8c7d6e5f"
 ENABLED = os.environ.get("SAFECIRCLE_PR4_PG_TEST") == "1"
 pytestmark = pytest.mark.skipif(
     not ENABLED,
@@ -220,9 +221,9 @@ def test_postgres_upgrade_preserves_alert_and_sets_complete_default(pg_env):
         before = conn.execute(text(
             "SELECT id,user_id,kind,status,created_at FROM alerts WHERE id=41"
         )).one()
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     with engine.connect() as conn:
-        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == REVISION
+        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
         assert conn.execute(text(
             "SELECT id,user_id,kind,status,created_at,notification_events_status "
             "FROM alerts WHERE id=41"
@@ -238,7 +239,7 @@ def test_postgres_upgrade_preserves_alert_and_sets_complete_default(pg_env):
 
 def test_postgres_recovery_is_idempotent_and_creates_one_notification_and_job(pg_env):
     engine, config, _ = pg_env
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     _add_relationship(engine)
     with Session(engine) as db:
         db.add(Device(user_id=2, fcm_token="synthetic-recovery-device", platform="android"))
@@ -272,12 +273,12 @@ def test_postgres_recovery_is_idempotent_and_creates_one_notification_and_job(pg
 
 def test_postgres_downgrade_refuses_pending_without_partial_schema_change(pg_env):
     engine, config, _ = pg_env
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     alert_id = _add_alert(engine, event_state="pending")
     with pytest.raises(RuntimeError, match="Pending panic event recovery"):
         command.downgrade(config, PARENT)
     with engine.connect() as conn:
-        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == REVISION
+        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
         assert conn.scalar(text(
             "SELECT notification_events_status FROM alerts WHERE id=:id"
         ), {"id": alert_id}) == "pending"
@@ -289,12 +290,12 @@ def test_postgres_downgrade_refuses_pending_without_partial_schema_change(pg_env
     with engine.connect() as conn:
         assert conn.scalar(text("SELECT version_num FROM alembic_version")) == PARENT
         assert "notification_events_status" not in {column["name"] for column in inspect(conn).get_columns("alerts")}
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
 
 
 def test_postgres_concurrent_recovery_creates_a_single_event(pg_env):
     engine, config, _ = pg_env
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     _add_relationship(engine)
     with Session(engine) as db:
         db.add(Device(user_id=2, fcm_token="synthetic-concurrent-recovery-device", platform="android"))
@@ -319,7 +320,7 @@ def test_postgres_concurrent_recovery_creates_a_single_event(pg_env):
 
 def test_postgres_worker_cancels_job_when_relationship_was_revoked_first(pg_env):
     engine, config, _ = pg_env
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     _add_relationship(engine)
     alert_id = _add_alert(engine)
     _, notice_id, job_id = _add_emergency_job(engine, alert_id=alert_id)
@@ -339,7 +340,7 @@ def test_postgres_worker_cancels_job_when_relationship_was_revoked_first(pg_env)
 
 def test_postgres_worker_authorization_lock_serializes_with_relationship_revocation(pg_env):
     engine, config, _ = pg_env
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     link_id = _add_relationship(engine)
     alert_id = _add_alert(engine)
     _, _, job_id = _add_emergency_job(engine, alert_id=alert_id)
@@ -376,7 +377,7 @@ def test_postgres_worker_authorization_lock_serializes_with_relationship_revocat
 
 def test_postgres_concurrent_workers_claim_one_emergency_job_once(pg_env):
     engine, config, _ = pg_env
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     _add_relationship(engine)
     alert_id = _add_alert(engine)
     _, _, job_id = _add_emergency_job(engine, alert_id=alert_id)
@@ -434,7 +435,7 @@ def test_postgres_acknowledgement_route_enforces_relationship_and_alert_state(
     pg_env, relationship_status, actor_id, alert_status, expected
 ):
     engine, config, _ = pg_env
-    command.upgrade(config, REVISION)
+    command.upgrade(config, "head")
     alert_id = _add_alert(engine, status=alert_status)
     if relationship_status is not None:
         _add_relationship(engine, relationship_status)

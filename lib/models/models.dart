@@ -1,39 +1,8 @@
-import 'package:flutter/material.dart';
 import 'profile_photo.dart';
 
 enum AlertKind { emergencySent, nearbyReceived, testSent }
 
 enum AlertStatus { active, resolved, cancelled, acknowledged }
-
-class EmergencyContact {
-  final int id;
-  final String name;
-  final String relationship;
-  final String phone;
-  final String initials;
-  final Color avatarColor;
-  final bool enabled;
-
-  const EmergencyContact({
-    required this.id,
-    required this.name,
-    required this.relationship,
-    required this.phone,
-    required this.initials,
-    required this.avatarColor,
-    this.enabled = true,
-  });
-
-  EmergencyContact copyWith({bool? enabled}) => EmergencyContact(
-        id: id,
-        name: name,
-        relationship: relationship,
-        phone: phone,
-        initials: initials,
-        avatarColor: avatarColor,
-        enabled: enabled ?? this.enabled,
-      );
-}
 
 class AlertEvent {
   final int id;
@@ -147,6 +116,7 @@ class NearbyPerson {
     required this.createdAt,
     this.latitude,
     this.longitude,
+    this.locationUpdatedAt,
   });
 
   // Checks whether the emergency has valid GPS coordinates.
@@ -159,4 +129,27 @@ class NearbyPerson {
       latitude! <= 90 &&
       longitude! >= -180 &&
       longitude! <= 180;
+
+  NearbyPerson copyWith({
+    String? name,
+    String? status,
+    double? latitude,
+    double? longitude,
+    DateTime? locationUpdatedAt,
+    bool clearLocation = false,
+  }) =>
+      NearbyPerson(
+        id: id,
+        ownerUserId: ownerUserId,
+        name: name ?? this.name,
+        distanceLabel: distanceLabel,
+        locationLabel: locationLabel,
+        status: status ?? this.status,
+        createdAt: createdAt,
+        latitude: clearLocation ? null : latitude ?? this.latitude,
+        longitude: clearLocation ? null : longitude ?? this.longitude,
+        locationUpdatedAt: locationUpdatedAt ?? this.locationUpdatedAt,
+      );
+
+  final DateTime? locationUpdatedAt;
 }

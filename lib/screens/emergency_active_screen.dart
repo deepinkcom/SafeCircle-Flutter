@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
-import '../widgets/mock_map.dart';
+import '../widgets/real_map.dart';
 import '../widgets/safe_circle_mark.dart';
 
 class EmergencyActiveScreen extends StatefulWidget {
@@ -70,7 +70,15 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     final ss = _elapsedSeconds % 60;
     final timeLabel =
         '00:${mm.toString().padLeft(2, '0')}:${ss.toString().padLeft(2, '0')}';
-    final usersAlerted = state.contacts.where((c) => c.enabled).length;
+    final usersAlerted = state.contactLinks.accepted.items
+        .where((link) => link.isAccepted)
+        .length;
+    final locationAge = state.locationUpdatedAt == null
+        ? null
+        : DateTime.now().difference(state.locationUpdatedAt!);
+    final locationFresh = locationAge != null &&
+        locationAge < const Duration(minutes: 1) &&
+        state.locationUpdateError == null;
 
     return Scaffold(
       body: SafeArea(
@@ -111,7 +119,7 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                               fontSize: 24)),
                     ],
                   ),
-                  const Text("We've alerted your trusted contacts.",
+                  const Text("We've alerted your accepted connections.",
                       style:
                           TextStyle(color: AppColors.textMuted, fontSize: 14)),
                   const SizedBox(height: 10),
@@ -122,13 +130,16 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                       color: AppColors.tealBg,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _Dot(),
-                        SizedBox(width: 6),
-                        Text('Live location sharing on',
-                            style: TextStyle(
+                        const _Dot(),
+                        const SizedBox(width: 6),
+                        Text(
+                            locationFresh
+                                ? 'Location updates active'
+                                : 'Last reported location',
+                            style: const TextStyle(
                                 color: AppColors.tealPrimary, fontSize: 12)),
                       ],
                     ),
@@ -144,10 +155,16 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     color: const Color(0xFFE7EEF1),
-                    child: const Stack(
+                    child: Stack(
                       children: [
-                        Positioned.fill(child: MockRouteMap()),
-                        Positioned(
+                        Positioned.fill(
+                          child: state.activeEmergencyPerson == null
+                              ? const Center(
+                                  child: Text('Emergency location unavailable'))
+                              : RealMap(
+                                  nearbyPerson: state.activeEmergencyPerson),
+                        ),
+                        const Positioned(
                           top: 14,
                           right: 14,
                           child: Column(
@@ -193,7 +210,10 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                                   style: TextStyle(
                                       color: AppColors.textMuted,
                                       fontSize: 13)),
-                              Text(state.currentLocation,
+                              Text(
+                                  state.currentLocation.isEmpty
+                                      ? 'Location unavailable'
+                                      : state.currentLocation,
                                   style:
                                       Theme.of(context).textTheme.titleMedium),
                             ],
@@ -210,6 +230,12 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                         ),
                       ],
                     ),
+                    if (state.locationUpdateError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(state.locationUpdateError!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: AppColors.redAlert)),
+                    ],
                     const SizedBox(height: 16),
                     Row(
                       children: [

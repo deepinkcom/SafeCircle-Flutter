@@ -32,6 +32,20 @@ UserProfile testProfile(String uid) => UserProfile(
 class ContactLinksFakeApi extends ApiService {
   Future<BackendProfileStatus> Function()? onProfileStatus;
   int profileStatusReads = 0;
+  Future<Map<String, dynamic>> Function(int)? onAlertLocation;
+
+  @override
+  Future<Map<String, dynamic>> fetchAlertLocation(int alertId) async =>
+      onAlertLocation != null
+          ? onAlertLocation!(alertId)
+          : {
+              'id': alertId,
+              'owner_user_id': 1,
+              'status': 'active',
+              'latitude': -33.9,
+              'longitude': 18.4,
+              'created_at': '2026-11-16T10:00:00Z',
+            };
 
   @override
   Future<BackendProfileStatus> fetchMyProfileStatus() async {
@@ -114,58 +128,7 @@ class ContactLinksFakeApi extends ApiService {
         : testLink(linkId, 'revoked');
   }
 
-  List<Map<String, dynamic>> phoneContacts = [
-    {
-      'id': 10,
-      'name': 'Phone Contact',
-      'relationship': 'Friend',
-      'phone': '0000000000',
-      'enabled': true
-    },
-  ];
-  int phoneReads = 0;
-  int phoneWrites = 0;
   int profileSyncs = 0;
-
-  @override
-  Future<List<Map<String, dynamic>>> fetchContacts() async {
-    phoneReads++;
-    return phoneContacts.map((item) => Map<String, dynamic>.of(item)).toList();
-  }
-
-  @override
-  Future<Map<String, dynamic>> createContact(
-      {required String name,
-      required String relationship,
-      required String phone,
-      bool enabled = true}) async {
-    phoneWrites++;
-    final value = {
-      'id': 11,
-      'name': name,
-      'relationship': relationship,
-      'phone': phone,
-      'enabled': enabled
-    };
-    phoneContacts.add(value);
-    return value;
-  }
-
-  @override
-  Future<Map<String, dynamic>> updateContact(
-      {required int contactId,
-      String? name,
-      String? relationship,
-      String? phone,
-      bool? enabled}) async {
-    phoneWrites++;
-    final value = phoneContacts.firstWhere((item) => item['id'] == contactId);
-    if (name != null) value['name'] = name;
-    if (relationship != null) value['relationship'] = relationship;
-    if (phone != null) value['phone'] = phone;
-    if (enabled != null) value['enabled'] = enabled;
-    return Map.of(value);
-  }
 
   @override
   Future<Map<String, dynamic>> syncMyProfile(

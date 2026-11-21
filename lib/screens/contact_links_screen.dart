@@ -164,7 +164,7 @@ class _ContactLinksScreenState extends State<ContactLinksScreen>
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 72,
-        title: const Text('SafeCircle Connections',
+        title: const Text('My Connections',
             maxLines: 2, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
@@ -205,7 +205,7 @@ class _ContactLinksScreenState extends State<ContactLinksScreen>
                                   label: const Text('Invite by email')),
                               const SizedBox(height: 12),
                               const Text(
-                                  'While a connection is accepted, both people may receive an in-app notification and a push on registered devices when either triggers a panic alert. Device permissions and registration are required for push delivery. These connections do not change your separate phone-contact list.'),
+                                  'Accepted connections are your emergency contacts. They receive panic alerts and may view protected emergency locations or acknowledge an active alert. Pending requests do not receive emergency access.'),
                               const SizedBox(height: 12),
                               if (state.isAccessBlocked)
                                 ContactLinksAccessPanel(

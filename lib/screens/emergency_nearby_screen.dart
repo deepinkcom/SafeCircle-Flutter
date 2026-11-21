@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
 import '../models/models.dart';
+import '../services/api_failure.dart';
+import '../services/emergency_call_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/real_map.dart';
 import '../widgets/safe_circle_mark.dart';
@@ -30,14 +33,78 @@ class EmergencyNearbyScreen extends StatefulWidget {
 class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
   String? _relationshipsForUid;
   int? _relationshipsForSession;
+  NearbyPerson? _notificationPerson;
+  Timer? _locationRefresh;
+  bool _refreshingLocation = false;
+  String? _locationRefreshError;
+
+  Future<void> _callEmergencyServices() async {
+    try {
+      final opened = await EmergencyCallService().openDialler();
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not open the phone dialler on this device.')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not open the phone dialler on this device.')));
+      }
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _notificationPerson = widget.notificationAlert;
     if (widget.notificationAlert == null) {
       context.read<AppState>().loadNearbyAlert();
     }
     _ensureAcceptedRelationships(context.read<AppState>());
+    _locationRefresh = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!mounted || _refreshingLocation) return;
+      final state = context.read<AppState>();
+      final person = widget.notificationAlert == null
+          ? state.nearbyPerson
+          : _notificationPerson;
+      if (person == null ||
+          person.status != 'active' ||
+          _acknowledgementAccess(state, person) !=
+              _AcknowledgementAccess.allowed) {
+        return;
+      }
+      _refreshingLocation = true;
+      unawaited(state.refreshEmergencyLocation(person).then((updated) {
+        if (mounted && updated != null && widget.notificationAlert != null) {
+          setState(() {
+            _notificationPerson = updated;
+            _locationRefreshError = null;
+          });
+        }
+        if (mounted && updated != null && widget.notificationAlert == null) {
+          setState(() => _locationRefreshError = null);
+        }
+      }).catchError((Object error) {
+        if (error is ApiFailure && error.kind == ApiFailureKind.notFound) {
+          state.expireEmergencyLocation(person.id);
+          if (mounted && widget.notificationAlert != null) {
+            setState(() => _notificationPerson =
+                person.copyWith(status: 'resolved', clearLocation: true));
+          }
+          return;
+        }
+        if (mounted) {
+          setState(() => _locationRefreshError =
+              'Location refresh failed. The displayed point may be stale.');
+        }
+      }).whenComplete(() => _refreshingLocation = false));
+    });
+  }
+
+  @override
+  void dispose() {
+    _locationRefresh?.cancel();
+    super.dispose();
   }
 
   void _ensureAcceptedRelationships(AppState state) {
@@ -146,7 +213,7 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
       _AcknowledgementAccess.owner =>
         'You cannot acknowledge your own emergency alert.',
       _AcknowledgementAccess.denied =>
-        'Only accepted emergency contacts can acknowledge this alert.',
+        'Only accepted connections can acknowledge this alert.',
       _AcknowledgementAccess.checking =>
         'Checking emergency-contact authorization…',
       _AcknowledgementAccess.unavailable => state
@@ -177,7 +244,7 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
     final person = widget.notificationAlert == null
         ? state.nearbyPerson
         : state.notifications.sessionVersion == widget.notificationSession
-            ? widget.notificationAlert
+            ? _notificationPerson
             : null;
     final textTheme = Theme.of(context).textTheme;
 
@@ -351,9 +418,11 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                             color: const Color(0xFFE7EEF1),
 
                             // Real GPS map
-                            child: RealMap(
-                              nearbyPerson: person,
-                            ),
+                            child: person.hasValidLocation
+                                ? RealMap(nearbyPerson: person)
+                                : const Center(
+                                    child: Text(
+                                        'Emergency location is unavailable')),
                           ),
                         ),
                         const SizedBox(height: 14),
@@ -375,7 +444,7 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                person.name,
+                                _displayName(state, person),
                                 style: textTheme.titleLarge,
                               ),
                             ),
@@ -398,7 +467,9 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                                 ? Icons.check_circle
                                 : Icons.location_off,
                             text: person.hasValidLocation
-                                ? 'Emergency location available'
+                                ? _locationRefreshError == null
+                                    ? 'Reported emergency location'
+                                    : 'Location may be stale'
                                 : 'Emergency location unavailable',
                             color: person.hasValidLocation
                                 ? AppColors.tealPrimary
@@ -406,6 +477,15 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                           ),
                         ),
                         const SizedBox(height: 6),
+                        if (_locationRefreshError != null)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(_locationRefreshError!,
+                                style:
+                                    const TextStyle(color: AppColors.redAlert)),
+                          ),
+                        if (_locationRefreshError != null)
+                          const SizedBox(height: 6),
                         Align(
                           alignment: Alignment.centerLeft,
                           child: _InfoLine(
@@ -458,8 +538,18 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                                   ),
                                 ),
                                 body: SafeArea(
-                                  child: RealMap(
-                                    nearbyPerson: person,
+                                  child: Consumer<AppState>(
+                                    builder: (_, current, __) => RealMap(
+                                      nearbyPerson:
+                                          current.emergencyLocationCache[
+                                                  person.id] ??
+                                              (current.expiredEmergencyLocations
+                                                      .contains(person.id)
+                                                  ? person.copyWith(
+                                                      status: 'resolved',
+                                                      clearLocation: true)
+                                                  : person),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -478,7 +568,7 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                           size: 18,
                         ),
                         label: const Text(
-                          'View Live Location',
+                          'View Emergency Location',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
@@ -491,7 +581,7 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton.icon(
-                        onPressed: () {},
+                        onPressed: _callEmergencyServices,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.redAlert,
                           foregroundColor: Colors.white,
@@ -561,6 +651,18 @@ class _EmergencyNearbyScreenState extends State<EmergencyNearbyScreen> {
         ),
       ),
     );
+  }
+
+  String _displayName(AppState state, NearbyPerson person) {
+    final uid = state.backendProfile?.id;
+    if (uid != null && person.ownerUserId == uid) return 'You';
+    for (final link in state.contactLinks.accepted.items) {
+      if (link.isAccepted && link.otherUserId == person.ownerUserId) {
+        final name = link.otherUser?.name.trim() ?? '';
+        return name.isEmpty ? 'SafeCircle connection' : name;
+      }
+    }
+    return 'Emergency nearby';
   }
 }
 

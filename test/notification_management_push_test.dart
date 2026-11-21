@@ -101,7 +101,7 @@ void main() {
       (title: 'SafeCircle', body: 'You have a SafeCircle update.'),
       (
         title: 'SafeCircle emergency alert',
-        body: 'An emergency contact has triggered a panic alert.',
+        body: 'A SafeCircle connection has triggered a panic alert.',
       ),
     ]);
     await service.dispose();

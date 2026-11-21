@@ -7,16 +7,17 @@ import '../widgets/top_brand_bar.dart';
 import '../widgets/backend_profile_banner.dart';
 import '../widgets/profile_photo_avatar.dart';
 import '../widgets/profile_photo_editor.dart';
+import 'password_screens.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen(
       {super.key,
-      required this.onOpenContacts,
+      required this.onOpenConnections,
       required this.onLogOut,
       this.onOpenNotifications,
       this.onNotificationSettings});
 
-  final VoidCallback onOpenContacts;
+  final VoidCallback onOpenConnections;
   final VoidCallback onLogOut;
   final VoidCallback? onOpenNotifications;
   final VoidCallback? onNotificationSettings;
@@ -26,12 +27,31 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  void _changePassword() {
+    final app = context.read<AppState>();
+    final owner = app.userProfile.uid;
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => ChangePasswordScreen(
+              passwordEnabled: app.canChangePassword,
+              onChange: (current, next) => app.changePassword(
+                ownerUid: owner,
+                currentPassword: current,
+                newPassword: next,
+              ),
+            )));
+  }
+
   Future<void> _editProfilePicture() async {
     final app = context.read<AppState>();
     final uid = app.userProfile.uid;
     final session = app.photoSessionVersion;
     final saved = await showProfilePhotoEditor(context);
-    if (!mounted || saved != true || app.userProfile.uid != uid || app.photoSessionVersion != session) return;
+    if (!mounted ||
+        saved != true ||
+        app.userProfile.uid != uid ||
+        app.photoSessionVersion != session) {
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(app.photoError ?? 'Your profile picture was updated.'),
     ));
@@ -83,8 +103,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    ProfilePhotoAvatar(ownerUid: profile.uid,
-                      onTap: profile.isSignedIn ? _editProfilePicture : null),
+                    ProfilePhotoAvatar(
+                        ownerUid: profile.uid,
+                        onTap: profile.isSignedIn ? _editProfilePicture : null),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
@@ -147,12 +168,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             if (context.watch<AppState>().photoError != null)
               Text(context.watch<AppState>().photoError!,
-                style: const TextStyle(color: AppColors.redAlert)),
+                  style: const TextStyle(color: AppColors.redAlert)),
             _SettingsRow(
               icon: Icons.person,
               title: 'Personal Details',
               subtitle: 'Update your name, phone and city',
               onTap: _editPersonalDetails,
+            ),
+            _SettingsRow(
+              icon: Icons.lock_outline,
+              title: 'Change Password',
+              subtitle: 'Manage your sign-in password',
+              onTap: _changePassword,
             ),
             _SettingsRow(
               icon: Icons.shield,
@@ -168,15 +195,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: widget.onNotificationSettings ?? () {}),
             _SettingsRow(
               icon: Icons.groups,
-              title: 'Emergency Contacts',
-              subtitle: 'View and manage your contacts',
-              onTap: widget.onOpenContacts,
-            ),
-            _SettingsRow(
-              icon: Icons.help_outline,
-              title: 'Help & Support',
-              subtitle: 'Get help and view FAQs',
-              onTap: () {},
+              title: 'My Connections',
+              subtitle: 'Manage the people who receive your panic alerts',
+              onTap: widget.onOpenConnections,
             ),
             _SettingsRow(
               icon: Icons.logout,
@@ -368,12 +389,15 @@ class _PersonalDetailsDialogState extends State<_PersonalDetailsDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ProfilePhotoAvatar(ownerUid: widget.profile.uid, size: 80,
-              onTap: _busy ? null : () => showProfilePhotoEditor(context)),
-            TextButton(onPressed: _busy ? null : () => showProfilePhotoEditor(context),
-              child: const Text('Change profile picture')),
+            ProfilePhotoAvatar(
+                ownerUid: widget.profile.uid,
+                size: 80,
+                onTap: _busy ? null : () => showProfilePhotoEditor(context)),
+            TextButton(
+                onPressed: _busy ? null : () => showProfilePhotoEditor(context),
+                child: const Text('Change profile picture')),
             const Text(
-                'Name, phone and city are required for SafeCircle Connections. Save to synchronize only your signed-in account.'),
+                'Name, phone and city are required for My Connections. Save to synchronize only your signed-in account.'),
             TextField(
               controller: _name,
               textCapitalization: TextCapitalization.words,

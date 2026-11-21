@@ -4,7 +4,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:safecircle/navigation/app_router.dart';
 import 'package:safecircle/screens/contact_links_screen.dart';
-import 'package:safecircle/screens/contacts_screen.dart';
 import 'package:safecircle/screens/emergency_active_screen.dart';
 import 'package:safecircle/screens/invite_contact_screen.dart';
 import 'package:safecircle/screens/login_screen.dart';
@@ -51,20 +50,18 @@ Future<NavigationAppState> boot(
 
 Future<void> openConnections(WidgetTester tester) async {
   await tapText(tester, 'Profile');
-  await tapText(tester, 'Emergency Contacts');
-  await tapText(tester, 'SafeCircle Connections');
+  await tapText(tester, 'My Connections');
 }
 
 void main() {
   testWidgets(
-      'existing contact entry opens shared state, invitation route and refreshes on return',
+      'My Connections opens shared connection state and invitation route',
       (tester) async {
     final api = ContactLinksFakeApi()..acceptedData = [testLink(1, 'accepted')];
     final state = await boot(tester, api);
-    await tapText(tester, 'Emergency\nContacts');
-    expect(find.byType(ContactsScreen), findsOneWidget);
-    expect(find.text('Phone Contact'), findsOneWidget);
-    await tapText(tester, 'SafeCircle Connections');
+    await openConnections(tester);
+    expect(find.text('My Connections'), findsOneWidget);
+    expect(find.text('Phone Contact'), findsNothing);
     final provided = tester
         .element(find.byType(ContactLinksScreen))
         .read<ContactLinksState>();
@@ -90,10 +87,7 @@ void main() {
     expect(api.acceptedCalls, before + 1);
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.text('Phone Contact'), findsOneWidget);
-    expect(api.phoneReads, 1);
-    expect(api.phoneWrites, 0);
-    expect(state.contacts.where((contact) => contact.enabled), hasLength(1));
+    expect(find.byType(ContactLinksScreen), findsNothing);
   });
 
   testWidgets(
@@ -107,7 +101,6 @@ void main() {
     await tapText(tester, 'Sign in again');
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.byType(ContactLinksScreen), findsNothing);
-    expect(find.byType(ContactsScreen), findsNothing);
     expect(state.contactLinks.userId, isNull);
     expect(state.contactLinks.accepted.items, isEmpty);
   });
@@ -136,33 +129,15 @@ void main() {
   });
 
   testWidgets(
-      'existing phone add, edit, enable and disable remain separate from relationships',
+      'My Connections uses accepted links as emergency recipients and has no manual contacts UI',
       (tester) async {
     final api = ContactLinksFakeApi()..acceptedData = [testLink(1, 'accepted')];
     final state = await boot(tester, api);
-    await tapText(tester, 'Emergency\nContacts');
-    await tester.tap(find.byType(Switch));
-    await tester.pumpAndSettle();
-    expect(state.contacts.single.enabled, isFalse);
-    await tester.tap(find.byTooltip('Edit phone contact'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-        find.byType(TextField).first, 'Edited Phone Contact');
-    await tapText(tester, 'Save');
-    expect(state.contacts.single.name, 'Edited Phone Contact');
-    await tapText(tester, 'Add Contact');
-    await tester.enterText(
-        find.byType(TextField).at(0), 'Another Phone Contact');
-    await tester.enterText(find.byType(TextField).at(1), 'Family');
-    await tester.enterText(find.byType(TextField).at(2), '0000000001');
-    await tapText(tester, 'Add');
-    expect(state.contacts, hasLength(2));
-    expect(state.contacts.where((contact) => contact.enabled), hasLength(1));
-    await tapText(tester, 'SafeCircle Connections');
+    await openConnections(tester);
     expect(find.text('Accepted'), findsOneWidget);
-    expect(state.contacts, hasLength(2));
-    expect(state.contacts.where((contact) => contact.enabled), hasLength(1));
-    expect(api.phoneWrites, 3);
+    expect(find.text('Add Contact'), findsNothing);
+    expect(find.byType(Switch), findsNothing);
+    await state.contactLinks.loadAcceptedRelationships();
     await tester.pumpWidget(ChangeNotifierProvider<AppState>.value(
         value: state,
         child: MaterialApp(
@@ -170,7 +145,6 @@ void main() {
                 EmergencyActiveScreen(onBack: () {}, onImSafe: () async {}))));
     await tester.pumpAndSettle();
     expect(find.text('1'), findsWidgets);
-    expect(state.contacts.where((contact) => contact.enabled).length, 1);
     expect(state.contactLinks.accepted.items, hasLength(1));
     await tester.pumpWidget(const SizedBox.shrink());
   });

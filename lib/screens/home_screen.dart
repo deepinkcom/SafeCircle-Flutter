@@ -9,13 +9,13 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
     required this.onActivatePanic,
-    required this.onOpenContacts,
+    required this.onOpenConnections,
     required this.onOpenAlerts,
     this.onOpenNotifications,
   });
 
   final VoidCallback onActivatePanic;
-  final VoidCallback onOpenContacts;
+  final VoidCallback onOpenConnections;
   final VoidCallback onOpenAlerts;
   final VoidCallback? onOpenNotifications;
 
@@ -154,8 +154,8 @@ class HomeScreen extends StatelessWidget {
                     Expanded(
                       child: _QuickAction(
                         icon: Icons.groups,
-                        label: 'Emergency\nContacts',
-                        onTap: onOpenContacts,
+                        label: 'My\nConnections',
+                        onTap: onOpenConnections,
                       ),
                     ),
                     const SizedBox(width: 12),

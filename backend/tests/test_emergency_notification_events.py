@@ -12,6 +12,7 @@ from app.models import (
     Alert,
     AlertAcknowledgement,
     Device,
+    EmergencyContact,
     Notification,
     PushDelivery,
 )
@@ -34,6 +35,8 @@ def inbox(client, monkeypatch, database):
     monkeypatch.setattr("app.alerts.WKTElement", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("app.notifications.ST_Y", lambda _point: literal(-33.9))
     monkeypatch.setattr("app.notifications.ST_X", lambda _point: literal(18.4))
+    monkeypatch.setattr("app.alerts.ST_Y", lambda _point: literal(-33.9))
+    monkeypatch.setattr("app.alerts.ST_X", lambda _point: literal(18.4))
     return client
 
 
@@ -235,6 +238,46 @@ def test_notification_alert_route_returns_gone_after_alert_resolution(
     assert response.status_code == 410
 
 
+@pytest.mark.parametrize("relationship", ["pending", "rejected", "revoked"])
+def test_location_endpoint_denies_nonaccepted_relationships(
+    inbox, database, relationship
+):
+    link = invite(inbox).json()
+    if relationship == "rejected":
+        assert respond(inbox, link["id"], "reject").status_code == 200
+    elif relationship == "revoked":
+        assert respond(inbox, link["id"], "accept").status_code == 200
+        assert inbox.delete(
+            f"/contact-links/{link['id']}", headers=headers(1)
+        ).status_code == 200
+
+    alert_id = panic(inbox).json()["id"]
+    response = inbox.get(
+        f"/alerts/{alert_id}/location", headers=headers(2)
+    )
+    assert response.status_code == 404
+
+
+def test_location_endpoint_returns_current_point_to_accepted_and_hides_after_resolution(
+    inbox, database
+):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
+    alert_id = panic(inbox).json()["id"]
+
+    response = inbox.get(f"/alerts/{alert_id}/location", headers=headers(2))
+    assert response.status_code == 200
+    assert response.json()["latitude"] == -33.9
+    assert response.json()["longitude"] == 18.4
+
+    assert inbox.post(
+        f"/alerts/{alert_id}/resolve", headers=headers(1)
+    ).status_code == 200
+    assert inbox.get(
+        f"/alerts/{alert_id}/location", headers=headers(2)
+    ).status_code == 404
+
+
 @pytest.mark.parametrize(
     "relationship,actor,resolve,expected_status",
     [
@@ -285,6 +328,59 @@ def test_acknowledgement_rejects_guessed_alert_id(inbox, database):
     assert response.status_code == 404
     with Session(database) as db:
         assert db.scalars(select(AlertAcknowledgement)).all() == []
+
+
+def test_acknowledgement_creates_one_owner_notification_and_device_job(inbox, database):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
+    with Session(database) as db:
+        db.add(Device(user_id=1, fcm_token="synthetic-owner-device", platform="android"))
+        db.commit()
+    alert_id = panic(inbox).json()["id"]
+
+    first = inbox.post(f"/alerts/{alert_id}/acknowledge", headers=headers(2))
+    repeated = inbox.post(f"/alerts/{alert_id}/acknowledge", headers=headers(2))
+
+    assert first.status_code == repeated.status_code == 200
+    assert first.json()["id"] == repeated.json()["id"]
+    with Session(database) as db:
+        notices = db.scalars(select(Notification).where(
+            Notification.recipient_user_id == 1,
+            Notification.category == "emergency",
+            Notification.event_type == "emergency.acknowledged",
+        )).all()
+        jobs = db.scalars(select(PushDelivery).where(
+            PushDelivery.notification_id == notices[0].id,
+        )).all()
+        assert len(notices) == 1
+        assert notices[0].source_id == first.json()["id"]
+        assert "User 2" in notices[0].message
+        assert len(jobs) == 1
+        assert jobs[0].device_id == db.scalar(select(Device.id).where(Device.user_id == 1))
+        deliveries = []
+        assert deliver_one(
+            db,
+            lambda token, notice, uid: deliveries.append((token, notice.id, uid)),
+        )
+        assert deliveries == [
+            ("synthetic-owner-device", notices[0].id, "synthetic-uid-1")
+        ]
+
+
+def test_acknowledgement_push_is_cancelled_if_connection_is_revoked(inbox, database):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
+    with Session(database) as db:
+        db.add(Device(user_id=1, fcm_token="synthetic-owner-device", platform="android"))
+        db.commit()
+    alert_id = panic(inbox).json()["id"]
+    assert inbox.post(f"/alerts/{alert_id}/acknowledge", headers=headers(2)).status_code == 200
+    assert inbox.delete(f"/contact-links/{link['id']}", headers=headers(1)).status_code == 200
+
+    with Session(database) as db:
+        assert deliver_one(db, lambda *_: pytest.fail("Revoked response push sent"))
+        job = db.scalar(select(PushDelivery).join(Notification))
+        assert job.status == "cancelled"
 
 
 def test_accepted_inviter_receives_emergency_notification(inbox, database):
@@ -347,6 +443,31 @@ def test_non_accepted_contacts_do_not_receive_emergency_notifications(
             db,
             alert=alert,
             created_at=alert.created_at,
+        )
+        db.commit()
+
+    assert count == 0
+    assert get_emergency_events(database, alert.id) == []
+
+
+def test_legacy_manual_contact_is_not_an_emergency_notification_recipient(
+    inbox, database
+):
+    with Session(database) as db:
+        db.add(EmergencyContact(
+            id=990,
+            user_id=1,
+            name="Legacy contact",
+            relationship="Friend",
+            phone="0000000000",
+            enabled=True,
+        ))
+        db.commit()
+
+    alert = create_alert(user_id=1, alert_id=904)
+    with Session(database) as db:
+        count = record_emergency_alert_events(
+            db, alert=alert, created_at=alert.created_at
         )
         db.commit()
 
@@ -426,6 +547,39 @@ def test_multiple_devices_receive_separate_push_delivery_jobs(
 
         assert len(deliveries) == 2
         assert all(delivery.status == "pending" for delivery in deliveries)
+
+
+def test_worker_cancels_emergency_push_after_connection_is_revoked(
+    inbox, database
+):
+    link = invite(inbox).json()
+    assert respond(inbox, link["id"], "accept").status_code == 200
+    with Session(database) as db:
+        db.add(Device(
+            user_id=2,
+            fcm_token="synthetic-token-revoked-link",
+            platform="android",
+        ))
+        db.commit()
+
+    alert_id = panic(inbox).json()["id"]
+    emergency_events = get_emergency_events(database, alert_id)
+    assert len(emergency_events) == 1
+
+    assert inbox.delete(
+        f"/contact-links/{link['id']}", headers=headers(1)
+    ).status_code == 200
+
+    sent = []
+    with Session(database) as db:
+        assert deliver_one(db, lambda *args: sent.append(args)) is True
+    assert sent == []
+
+    with Session(database) as db:
+        delivery = db.scalar(select(PushDelivery).where(
+            PushDelivery.notification_id == emergency_events[0].id,
+        ))
+        assert delivery.status == "cancelled"
 
 
 def test_duplicate_emergency_event_does_not_create_duplicate_notifications(

@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.venv/
+.venv-backend-test/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+*.sqlite
+*.db
+tests/
+requirements-test.txt
