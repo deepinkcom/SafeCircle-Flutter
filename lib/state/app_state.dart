@@ -468,6 +468,81 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<String?> logInWithGoogle() async {
+    if (_disposed) return 'This sign-in attempt is no longer active.';
+    final generation = _beginAuthentication();
+    try {
+      final profile = await _auth.logInWithGoogle();
+      if (!_currentAuthentication(generation)) {
+        return 'This sign-in attempt is no longer active.';
+      }
+      if (profile == null) return 'Google sign-in was cancelled.';
+      userProfile = profile;
+      final boundGeneration = _authGeneration;
+      notifyListeners();
+      if (!_currentAuthentication(boundGeneration)) {
+        return 'This sign-in attempt is no longer active.';
+      }
+      await checkBackendProfile();
+      if (!_currentAuthentication(boundGeneration) ||
+          userProfile.uid != profile.uid) {
+        return 'This sign-in attempt is no longer active.';
+      }
+      return null;
+    } on AuthFailure catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'Google sign-in could not complete. Please try again.';
+    }
+  }
+
+  bool get canChangePassword => _auth.canChangePasswordFor(userProfile.uid);
+  bool _changingPassword = false;
+
+  Future<String?> sendPasswordReset(String email) async {
+    try {
+      await _auth.sendPasswordReset(email);
+      return null;
+    } on AuthFailure catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'The reset email request could not complete. Check your connection and retry.';
+    }
+  }
+
+  Future<String?> changePassword({
+    required String ownerUid,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    if (_disposed || ownerUid.isEmpty || ownerUid != userProfile.uid) {
+      return 'Your account changed. Close this screen and sign in again.';
+    }
+    if (_changingPassword) {
+      return 'Your password is already being updated. Please wait.';
+    }
+    final generation = _authGeneration;
+    bool current() =>
+        _currentAuthentication(generation) && userProfile.uid == ownerUid;
+    _changingPassword = true;
+    try {
+      await _auth.changePassword(
+          ownerUid: ownerUid,
+          currentPassword: currentPassword,
+          newPassword: newPassword,
+          isCurrent: current);
+      return current()
+          ? null
+          : 'Your account changed. Sign in again to confirm your password.';
+    } on AuthFailure catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'The password update could not be confirmed. Check your connection and retry, or use Forgot Password.';
+    } finally {
+      _changingPassword = false;
+    }
+  }
+
   Future<String?> updateProfile({
     required String name,
     required String phone,
